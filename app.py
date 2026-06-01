@@ -6,6 +6,7 @@ import anthropic
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import column_index_from_string
 
 try:
     import pdfplumber
@@ -63,48 +64,110 @@ NUMERIC = {
 
 SYSTEM = """You are a technical bid tab assistant for an engineering procurement team.
 
-You receive a DATA SHEET and up to 3 VENDOR QUOTES.
-Extract all available data and return ONLY valid JSON — no markdown, no explanation.
+You receive a DATA SHEET and up to 3 VENDOR QUOTES (marked === VENDOR 1 ===, === VENDOR 2 ===, === VENDOR 3 ===).
+Extract ALL available data from EVERY section and return ONLY valid JSON — no markdown, no explanation, no extra text.
 
-Return this exact structure:
+Return this exact top-level structure:
 {
-  "datasheet": { ...fields from the data sheet... },
-  "vendor1": { ...fields from vendor 1... },
-  "vendor2": { ...fields from vendor 2... },
-  "vendor3": { ...fields from vendor 3... }
+  "datasheet": { ...all fields found in the data sheet... },
+  "vendor1":   { ...all fields found in vendor 1 quote... },
+  "vendor2":   { ...all fields found in vendor 2 quote... },
+  "vendor3":   { ...all fields found in vendor 3 quote... }
 }
 
-Field keys (extract any value you find for these):
-supplier, quotation_number, quotation_date, quotation_validity,
-tag_number, service, datasheet_doc_no, datasheet_revision,
-pump_type, pump_size_qty, pump_manufacturer, pump_model,
-flow_capacity, suction_pressure, discharge_pressure, npsh_available,
-operating_temp, specific_gravity, viscosity, vapor_pressure, corrosion_erosion_causes,
-proposal_curve_no, speed_rpm, npsh_required, rated_bhp,
-max_bhp_rated_impeller, max_head_rated_impeller, suction_specific_speed, efficiency,
-max_working_pressure, hydrostatic_test_pressure, impeller_diameter_criteria,
-mechanical_seal_type, suction_nozzle_size, suction_vents_drains,
-suction_pressure_gauge, discharge_nozzle_size,
-nace_mr0175, lethal_service, vibration_sensor_type,
-seal_flush_plans, external_seal_flush_flow,
-materials_class, barrel_case, impeller, case_wear_rings, shaft_sleeve,
-motor_type, motor_manufacturer, motor_model, horsepower, motor_rpm,
-motor_duty, motor_efficiency_type, enclosure, volts_phase_hertz,
-safety_factor, variable_frequency,
-performance_test, hydrostatic_test, options,
-location, max_min_site_temp, area_classification, max_sound,
-technical_recommendation, commercial_recommendation,
-pump_motor_price, vfd_price, quantity, lead_time,
-payment_terms, payment_schedule, manufacturing_location,
-delivery_terms, delivery_location, additional_freight, warranty, comments,
-adder_hydrostatic_cert, adder_witnessed_hydrostatic,
-adder_npshr_test, adder_witnessed_npshr,
-adder_api674_test, adder_witnessed_api674
+Use EXACTLY these field keys (descriptions in parentheses are for your reference only — do not include them):
+  supplier                  (vendor/manufacturer company name)
+  quotation_number          (quote or proposal number/reference)
+  quotation_date            (date of quotation)
+  quotation_validity        (validity period of quote)
+  tag_number                (equipment tag number or item number)
+  service                   (pump service description)
+  datasheet_doc_no          (data sheet document number)
+  datasheet_revision        (data sheet revision letter/number)
+  pump_type                 (e.g. centrifugal, API 610, between bearings, etc.)
+  pump_size_qty             (pump size and quantity)
+  pump_manufacturer         (pump maker name)
+  pump_model                (pump model or series designation)
+  flow_capacity             (rated flow with units, e.g. "500 GPM")
+  suction_pressure          (suction pressure with units)
+  discharge_pressure        (discharge pressure with units)
+  npsh_available            (NPSHa with units)
+  operating_temp            (operating temperature with units)
+  specific_gravity          (fluid specific gravity)
+  viscosity                 (fluid viscosity with units)
+  vapor_pressure            (vapor pressure with units)
+  corrosion_erosion_causes  (corrosive or erosive agents in fluid)
+  proposal_curve_no         (performance curve number)
+  speed_rpm                 (rated pump speed in RPM)
+  npsh_required             (NPSHr with units)
+  rated_bhp                 (brake horsepower at rated point)
+  max_bhp_rated_impeller    (max BHP at rated impeller diameter)
+  max_head_rated_impeller   (max head at rated impeller)
+  suction_specific_speed    (suction specific speed value)
+  efficiency                (pump efficiency at rated point, %)
+  max_working_pressure      (maximum allowable working pressure)
+  hydrostatic_test_pressure (hydrostatic test pressure)
+  impeller_diameter_criteria (impeller diameter / trim criteria)
+  mechanical_seal_type      (seal type, API plan, arrangement)
+  suction_nozzle_size       (suction flange size and rating)
+  suction_vents_drains      (vent/drain provisions on suction)
+  suction_pressure_gauge    (suction pressure gauge provided?)
+  discharge_nozzle_size     (discharge flange size and rating)
+  nace_mr0175               (NACE MR0175 compliance: Yes/No)
+  lethal_service            (lethal service designation: Yes/No)
+  vibration_sensor_type     (vibration monitoring sensor type)
+  seal_flush_plans          (API seal flush plan numbers)
+  external_seal_flush_flow  (external flush flow rate/source)
+  materials_class           (materials class designation)
+  barrel_case               (casing/barrel material)
+  impeller                  (impeller material)
+  case_wear_rings           (wear ring material)
+  shaft_sleeve              (shaft sleeve material)
+  motor_type                (motor type, e.g. TEFC induction)
+  motor_manufacturer        (motor maker name)
+  motor_model               (motor model)
+  horsepower                (motor rated horsepower)
+  motor_rpm                 (motor synchronous or nameplate RPM)
+  motor_duty                (motor duty rating, e.g. continuous)
+  motor_efficiency_type     (efficiency class, e.g. NEMA Premium)
+  enclosure                 (motor enclosure type, e.g. TEFC, TEAC)
+  volts_phase_hertz         (electrical supply, e.g. "460V/3Ph/60Hz")
+  safety_factor             (motor service factor)
+  variable_frequency        (VFD provided or compatible: Yes/No)
+  performance_test          (performance test type included)
+  hydrostatic_test          (hydrostatic test type included)
+  options                   (optional items or extras quoted)
+  location                  (installation site/location)
+  max_min_site_temp         (maximum and minimum ambient temperature at site)
+  area_classification       (electrical area classification, e.g. Class I Div 2)
+  max_sound                 (maximum allowable sound level)
+  technical_recommendation  (engineer technical notes or recommendation)
+  commercial_recommendation (commercial evaluation notes or recommendation)
+  pump_motor_price          (total pump+motor unit price — NUMBER only, no $ or commas)
+  vfd_price                 (VFD / variable frequency drive price — NUMBER only)
+  quantity                  (quantity of units — NUMBER only)
+  lead_time                 (delivery lead time)
+  payment_terms             (payment terms, e.g. Net 30)
+  payment_schedule          (milestone payment schedule)
+  manufacturing_location    (where equipment is manufactured)
+  delivery_terms            (delivery/shipping terms, e.g. FOB)
+  delivery_location         (delivery destination)
+  additional_freight        (extra freight or shipping charges)
+  warranty                  (warranty period and terms)
+  comments                  (any other notable comments or clarifications)
+  adder_hydrostatic_cert    (adder price for hydrostatic certification — NUMBER only)
+  adder_witnessed_hydrostatic (adder price for witnessed hydrostatic — NUMBER only)
+  adder_npshr_test          (adder price for NPSHr test — NUMBER only)
+  adder_witnessed_npshr     (adder price for witnessed NPSHr — NUMBER only)
+  adder_api674_test         (adder price for API 674 test — NUMBER only)
+  adder_witnessed_api674    (adder price for witnessed API 674 test — NUMBER only)
 
-Rules:
-- pump_motor_price, vfd_price, quantity, all adder_* = numbers only (no $ or commas) or null
-- null for any field not found
-- Return ONLY the JSON object"""
+Critical rules:
+- Use null for any field not found in the source document — never omit a key.
+- For NUMBER-only fields: strip all $ signs, commas, and units; return a bare number or null.
+- Be thorough: scan every table, section header, and footnote. Do not skip data.
+- vendor2 and vendor3 should be populated only from their respective === VENDOR N === sections; use null for all fields if that vendor section is absent.
+- Return ONLY the JSON object. No markdown fences, no commentary."""
 
 
 def extract_text(file_storage) -> str:
@@ -174,15 +237,26 @@ def _repair_json(s):
 
 
 def resolve_cell(ws, addr):
-    """Return the writable master cell for addr, resolving merged ranges."""
+    """Return the writable master cell for addr, or None if it's a cross-column merge.
+
+    - Cell merged across rows (same column): return the master cell so we can write to it.
+    - Cell merged across columns (different column): return None — writing to the master
+      cell of another column would corrupt the layout, so the caller should skip it.
+    """
     cell = ws[addr]
     if not isinstance(cell, MergedCell):
         return cell
+    col_letter = re.match(r'([A-Za-z]+)', addr).group(1).upper()
+    target_col = column_index_from_string(col_letter)
     for merge_range in ws.merged_cells.ranges:
         if addr in merge_range:
-            # top-left corner of the merged range is always writable
-            return ws.cell(merge_range.min_row, merge_range.min_col)
-    return cell  # fallback (shouldn't happen)
+            if merge_range.min_col == target_col:
+                # Merged vertically (same column) — write to master row
+                return ws.cell(merge_range.min_row, merge_range.min_col)
+            else:
+                # Merged horizontally into another column — skip
+                return None
+    return cell  # fallback: unrecognised merge, try as-is
 
 
 def fill_excel(template_bytes, data, pi):
@@ -201,7 +275,9 @@ def fill_excel(template_bytes, data, pi):
         "E7": pi.get("vendor3_name","Vendor 3"),
     }.items():
         if val:
-            resolve_cell(ws, addr).value = val
+            c = resolve_cell(ws, addr)
+            if c is not None:
+                c.value = val
 
     # Data rows
     col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
@@ -210,6 +286,8 @@ def fill_excel(template_bytes, data, pi):
             val = coerce((data.get(src) or {}).get(field), field)
             addr = f"{col}{row}"
             cell = resolve_cell(ws, addr)
+            if cell is None:
+                continue  # horizontally-merged cell — do not corrupt another column
             if val is not None:
                 cell.value = val
             elif col in ("C","D","E"):
@@ -219,7 +297,9 @@ def fill_excel(template_bytes, data, pi):
 
     # TOTAL formulas
     for col in ("C","D","E"):
-        resolve_cell(ws, f"{col}105").value = f"=SUM({col}100:{col}101)*{col}103"
+        c = resolve_cell(ws, f"{col}105")
+        if c is not None:
+            c.value = f"=SUM({col}100:{col}101)*{col}103"
 
     out = io.BytesIO()
     wb.save(out)
@@ -531,6 +611,13 @@ def generate():
             data = json.loads(raw)
         except json.JSONDecodeError:
             data = json.loads(_repair_json(raw))
+        # Log extraction summary for debugging
+        print("\n=== AI EXTRACTION SUMMARY ===")
+        for src in ("datasheet","vendor1","vendor2","vendor3"):
+            src_data = data.get(src) or {}
+            found = {k: v for k, v in src_data.items() if v is not None}
+            print(f"  [{src}] {len(found)} fields filled: {list(found.keys())}")
+        print("==============================\n")
     except json.JSONDecodeError as e:
         return jsonify({"error": f"AI returned malformed JSON: {e}"})
     except Exception as e:
