@@ -236,6 +236,15 @@ def _repair_json(s):
     return s
 
 
+def _master_addr(ws, addr):
+    """Return the address of the master cell for a merged cell (for logging)."""
+    for merge_range in ws.merged_cells.ranges:
+        if addr in merge_range:
+            from openpyxl.utils import get_column_letter
+            return f"{get_column_letter(merge_range.min_col)}{merge_range.min_row}"
+    return addr
+
+
 def resolve_cell(ws, addr):
     """Return the writable master cell for addr, or None if it's a cross-column merge.
 
@@ -262,6 +271,17 @@ def resolve_cell(ws, addr):
 def fill_excel(template_bytes, data, pi):
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
+
+    # Dump template row labels so we can verify ROW_MAP matches the actual file
+    print("\n=== TEMPLATE ROW STRUCTURE (cols A-B, rows 1-135) ===")
+    for r in range(1, 136):
+        a = ws[f"A{r}"]
+        b = ws[f"B{r}"]
+        av = a.value if not isinstance(a, MergedCell) else f"[merged→{_master_addr(ws,'A'+str(r))}]"
+        bv = b.value if not isinstance(b, MergedCell) else f"[merged→{_master_addr(ws,'B'+str(r))}]"
+        if av or bv:
+            print(f"  row {r:3d} | A={repr(av)!s:45s} | B={repr(bv)}")
+    print("=====================================================\n")
 
     # Header
     for addr, val in {
