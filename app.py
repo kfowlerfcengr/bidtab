@@ -140,6 +140,39 @@ def coerce(val, field):
     return s
 
 
+def _repair_json(s):
+    """Best-effort repair of truncated JSON by closing open structures."""
+    # Track nesting so we can close what was opened
+    stack = []
+    in_string = False
+    escape_next = False
+    for ch in s:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+    # If we're mid-string, close it
+    if in_string:
+        s += '"'
+    # Close any trailing comma before closing braces
+    s = re.sub(r",\s*$", "", s.rstrip())
+    # Close all open structures
+    s += "".join(reversed(stack))
+    return s
+
+
 def resolve_cell(ws, addr):
     """Return the writable master cell for addr, resolving merged ranges."""
     cell = ws[addr]
@@ -487,14 +520,17 @@ def generate():
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=4096,
+            max_tokens=8096,
             system=SYSTEM,
             messages=[{"role": "user", "content": content}]
         )
         raw = resp.content[0].text.strip()
         raw = re.sub(r"^```json\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        data = json.loads(raw)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = json.loads(_repair_json(raw))
     except json.JSONDecodeError as e:
         return jsonify({"error": f"AI returned malformed JSON: {e}"})
     except Exception as e:
