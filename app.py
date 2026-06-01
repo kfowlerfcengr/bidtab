@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify, send_file, render_template_string
 import anthropic
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+from openpyxl.cell.cell import MergedCell
 
 try:
     import pdfplumber
@@ -139,6 +140,18 @@ def coerce(val, field):
     return s
 
 
+def resolve_cell(ws, addr):
+    """Return the writable master cell for addr, resolving merged ranges."""
+    cell = ws[addr]
+    if not isinstance(cell, MergedCell):
+        return cell
+    for merge_range in ws.merged_cells.ranges:
+        if addr in merge_range:
+            # top-left corner of the merged range is always writable
+            return ws.cell(merge_range.min_row, merge_range.min_col)
+    return cell  # fallback (shouldn't happen)
+
+
 def fill_excel(template_bytes, data, pi):
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
@@ -154,14 +167,16 @@ def fill_excel(template_bytes, data, pi):
         "D7": pi.get("vendor2_name","Vendor 2"),
         "E7": pi.get("vendor3_name","Vendor 3"),
     }.items():
-        if val: ws[addr] = val
+        if val:
+            resolve_cell(ws, addr).value = val
 
     # Data rows
     col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
     for row, field in ROW_MAP.items():
         for src, col in col_map.items():
             val = coerce((data.get(src) or {}).get(field), field)
-            cell = ws[f"{col}{row}"]
+            addr = f"{col}{row}"
+            cell = resolve_cell(ws, addr)
             if val is not None:
                 cell.value = val
             elif col in ("C","D","E"):
@@ -171,7 +186,7 @@ def fill_excel(template_bytes, data, pi):
 
     # TOTAL formulas
     for col in ("C","D","E"):
-        ws[f"{col}105"] = f"=SUM({col}100:{col}101)*{col}103"
+        resolve_cell(ws, f"{col}105").value = f"=SUM({col}100:{col}101)*{col}103"
 
     out = io.BytesIO()
     wb.save(out)
