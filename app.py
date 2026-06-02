@@ -161,22 +161,50 @@ Extraction rules:
 def extract_text(file_storage) -> str:
     name = (file_storage.filename or "").lower()
     data = file_storage.read()
+
     if name.endswith(".pdf"):
         if not HAS_PDF:
-            return "[PDF unavailable]"
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            return "\n\n".join(p.extract_text() or "" for p in pdf.pages)
+            return "[PDF unavailable — install pdfplumber]"
+        try:
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
+                pages = []
+                for i, page in enumerate(pdf.pages, 1):
+                    text = page.extract_text()
+                    if text and text.strip():
+                        pages.append(f"[Page {i}]\n{text.strip()}")
+                return "\n\n".join(pages) if pages else "[PDF appears to be empty or image-only]"
+        except Exception as e:
+            return f"[PDF read error: {e}]"
+
     if name.endswith((".xlsx", ".xls")):
-        wb = load_workbook(io.BytesIO(data), data_only=True)
-        lines = []
-        for ws in wb.worksheets:
-            lines.append(f"[Sheet: {ws.title}]")
-            for row in ws.iter_rows(values_only=True):
-                parts = [str(c) if c is not None else "" for c in row]
-                if any(p.strip() for p in parts):
-                    lines.append("\t".join(parts))
-        return "\n".join(lines)
-    return data.decode("utf-8", errors="replace")
+        try:
+            wb = load_workbook(io.BytesIO(data), data_only=True)
+            lines = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                sheet_lines = []
+                for row in ws.iter_rows(values_only=True):
+                    parts = [str(c).strip() if c is not None else "" for c in row]
+                    if any(p for p in parts):
+                        sheet_lines.append("\t".join(parts))
+                if sheet_lines:
+                    lines.append(f"[Sheet: {sheet_name}]")
+                    lines.extend(sheet_lines)
+            return "\n".join(lines) if lines else "[Excel file appears empty]"
+        except Exception as e:
+            return f"[Excel read error: {e}]"
+
+    if name.endswith(".csv"):
+        try:
+            return data.decode("utf-8", errors="replace")
+        except Exception as e:
+            return f"[CSV read error: {e}]"
+
+    # Plain text fallback
+    try:
+        return data.decode("utf-8", errors="replace")
+    except Exception as e:
+        return f"[File read error: {e}]"
 
 def coerce(val, field):
     if val is None: return None
