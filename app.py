@@ -94,42 +94,69 @@ def build_row_map(ws):
 
 def build_system_prompt(row_map):
     field_list = ", ".join(sorted(set(row_map.values())))
-    return f"""You are a THOUROUGH technical bid tab assistant for an engineering procurement team.
 
-You have the capacity to receive several DATA SHEETS for ENGINEERING EQUIPMENT and up to SEVERAL VENDOR QUOTES.
+    # Build a dynamic example from the actual row map instead of hardcoding pump fields
+    price_fields = [f for f in row_map.values() if f.startswith("price_") and "total" not in f]
+    leadtime_fields = [f for f in row_map.values() if f.startswith("leadtime_")]
+    payment_fields = [f for f in row_map.values() if f.startswith("payment_")]
+    delivery_fields = [f for f in row_map.values() if f.startswith("delivery_")]
+    adder_fields = [f for f in row_map.values() if f.startswith("adder_")]
+
+    field_hints = []
+    if price_fields:
+        field_hints.append(f"- Price fields ({', '.join(price_fields[:3])}) = equipment prices as plain numbers, no $ or commas")
+    if leadtime_fields:
+        field_hints.append(f"- Lead time fields ({', '.join(leadtime_fields[:2])}) = delivery time (e.g. '12-14 Weeks ARO')")
+    if payment_fields:
+        field_hints.append(f"- Payment fields ({', '.join(payment_fields[:2])}) = payment terms and schedule")
+    if delivery_fields:
+        field_hints.append(f"- Delivery fields ({', '.join(delivery_fields[:3])}) = shipping terms, location, warranty, comments")
+    if adder_fields:
+        field_hints.append(f"- Adder fields ({', '.join(adder_fields[:3])}) = optional add-on prices as plain numbers")
+    if "quantity" in row_map.values():
+        field_hints.append("- 'quantity' = number of units (integer)")
+
+    field_hints_str = "\n".join(field_hints) if field_hints else ""
+
+    return f"""You are a THOROUGH technical bid tab assistant for an engineering procurement team.
+
+You may receive ONE OR MORE DATA SHEETS for engineering equipment, and up to SEVERAL VENDOR QUOTES.
+The equipment type will vary — pumps, heaters, compressors, heat exchangers, vessels, or any other equipment.
 Extract all available data and return ONLY valid JSON — no markdown, no explanation.
 
 Return this exact structure:
 {{
-  "datasheet": {{ ...fields from the data sheet... }},
+  "datasheet": {{ ...combined fields from ALL data sheets... }},
   "vendor1": {{ ...fields from vendor 1... }},
   "vendor2": {{ ...fields from vendor 2... }},
   "vendor3": {{ ...fields from vendor 3... }}
 }}
 
-The template has these exact field keys — use these names precisely:
+If there are multiple DATA SHEETS, merge all their fields into the single "datasheet" object.
+If the same field appears in multiple data sheets, use the most specific or detailed value.
+
+The template has these exact field keys — map ALL extracted data to these key names:
 {field_list}
 
-IMPORTANT field naming rules (fields are prefixed by their section):
-- "quantity" = number of units being purchased (integer)
-- "leadtime_pump_motor" = pump & motor lead time (e.g. "12-14 Weeks")
-- "payment_payment_terms" = payment terms (e.g. "Net 30")
-- "payment_payment_schedule_progress_payments" = payment schedule details
-- "delivery_manufacturing_location" = where the equipment is made
-- "delivery_delivery_terms_incoterms" = INCOTERMS (e.g. "FOB Origin")
-- "delivery_delivery_location" = where it ships to
-- "warranty" = warranty terms
-- "adder_*" fields = optional add-on pricing (numbers only)
-- "comments" = any additional notes
+How the field keys are structured (all come from this specific template):
+{field_hints_str}
 
-Rules:
-- datasheet key = values from the DATA SHEET only
-- vendor1/2/3/n = values from each vendor quote only
-- price_*, quantity, adder_* fields must be numbers (no $ or commas) or null
-- quantity is per vendor — extract the number of units each vendor is quoting (use context clues, if data sheet has quantity 2, vendor is most likely quoting 2)
-- null for any field not found
-- Be thorough — extract every spec, price, note, and commercial term, AND USE CONTEXT CLUES, do not fudge information for the sake of inptting information
-- Return ONLY the JSON object"""
+General rules for field naming:
+- Fields prefixed with "price_" are equipment/component prices → numbers only (no $ or commas)
+- Fields prefixed with "leadtime_" are delivery lead times → text (e.g. "12-14 Weeks ARO")
+- Fields prefixed with "payment_" are payment terms and schedules → text
+- Fields prefixed with "delivery_" are shipping, manufacturing, warranty, and commercial info → text
+- Fields prefixed with "adder_" are optional add-on prices → numbers only
+- "quantity" = number of units → integer
+
+Extraction rules:
+- "datasheet" key = combined values from ALL DATA SHEETS only
+- "vendor1/2/3/n" = values from each vendor quote only — never mix sources
+- All price/adder/quantity fields must be plain numbers (no $, commas, or units) or null
+- Use context clues for quantity if a vendor doesn't explicitly state it
+- null for any field not found — do NOT fabricate or guess information
+- Extract every spec, technical parameter, price, commercial term, and note you can find
+- Return ONLY the JSON object, nothing else"""
 
 def extract_text(file_storage) -> str:
     name = (file_storage.filename or "").lower()
@@ -305,7 +332,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <div class="topbar">
   <div class="brand">
     <img src="/static/logo.png?v=3" alt="F&C Engineers">
-    <span class="brand-name">Bid Tab Agent</span>
+    <span class="brand-name">Bid Tab Agent<span>AI</span></span>
   </div>
   <div class="badge" id="badge">Ready</div>
 </div>
@@ -339,14 +366,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   </div>
 
   <div class="card">
-    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills F&C standards column</p></div></div>
+    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheets</h2><p>Engineering specs — fills the standards column. Add one per equipment type.</p></div></div>
     <div class="cb">
-      <div class="uz" id="z-ds" onclick="document.getElementById('f-ds').click()"
-           ondragover="zo(event,'z-ds')" ondragleave="zl('z-ds')" ondrop="zd(event,'z-ds','f-ds')">
-        <input type="file" id="f-ds" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="chip(this,'chip-ds')">
-        <div class="uico">📄</div><h4>Upload data sheet</h4><p>Excel, PDF, CSV or text</p>
-        <div id="chip-ds"></div>
-      </div>
+      <div class="vgrid" id="dsgrid"></div>
+      <button type="button" class="add-vbtn" onclick="addDataSheet()">+ Add Data Sheet</button>
     </div>
   </div>
 
@@ -386,7 +409,57 @@ function zl(id){document.getElementById(id).classList.remove('drag');}
 function zd(e,zid,fid){e.preventDefault();zl(zid);const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById(fid);const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;chip(inp,fid==='f-ds'?'chip-ds':fid==='f-tmpl'?'chip-tmpl':null);}
 function chip(inp,chipId){const f=inp.files[0];if(!f||!chipId)return;document.getElementById(chipId).innerHTML=`<div class="fchip">✓ ${f.name}</div>`;}
 
-let vendorSlots=[];
+let dsSlots=[];
+let nextDSIdx=0;
+
+function makeDSCard(idx, displayNum){
+  const div=document.createElement('div');
+  div.className='vcard';div.id='dsc'+idx;
+  div.innerHTML=`
+    <div class="vhead" id="dsh${idx}">
+      <span>Data Sheet ${displayNum}</span>
+      <button type="button" class="vremove" onclick="removeDS(${idx})" title="Remove">×</button>
+    </div>
+    <div class="vbody">
+      <div class="vup" onclick="document.getElementById('dsf${idx}').click()">+ Attach file</div>
+      <input type="file" id="dsf${idx}" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf"
+             onchange="dsfile(this,${idx})">
+      <div class="vfname" id="dsfn${idx}"></div>
+    </div>`;
+  return div;
+}
+
+function addDataSheet(){
+  const idx=nextDSIdx++;
+  dsSlots.push(idx);
+  document.getElementById('dsgrid').appendChild(makeDSCard(idx,dsSlots.length));
+  syncDSButtons();
+}
+
+function removeDS(idx){
+  if(dsSlots.length<=1)return;
+  dsSlots=dsSlots.filter(i=>i!==idx);
+  const card=document.getElementById('dsc'+idx);
+  if(card)card.remove();
+  syncDSButtons();
+}
+
+function syncDSButtons(){
+  const show=dsSlots.length>1;
+  dsSlots.forEach(i=>{
+    const btn=document.getElementById('dsc'+i)?.querySelector('.vremove');
+    if(btn)btn.style.visibility=show?'visible':'hidden';
+  });
+}
+
+function dsfile(inp,idx){
+  const f=inp.files[0];if(!f)return;
+  document.getElementById('dsfn'+idx).textContent='✓ '+f.name;
+  document.getElementById('dsc'+idx).classList.add('loaded');
+  document.getElementById('dsh'+idx).classList.add('loaded');
+}
+
+(function initDS(){addDataSheet();}());
 let nextVIdx=0;
 
 function makeVendorCard(idx,displayNum){
@@ -443,9 +516,9 @@ function vfile(inp,idx){
 async function run(){
   const tmplFile=document.getElementById('f-tmpl').files[0];
   if(!tmplFile){alert('Please upload your bid tab template (.xlsx).');return;}
-  const dsFile=document.getElementById('f-ds').files[0];
   const hasVendor=vendorSlots.some(i=>document.getElementById('vf'+i)?.files[0]);
-  if(!dsFile&&!hasVendor){alert('Please upload at least a data sheet or one vendor quote.');return;}
+  const hasDS=dsSlots.some(i=>document.getElementById('dsf'+i)?.files[0]);
+  if(!hasDS&&!hasVendor){alert('Please upload at least a data sheet or one vendor quote.');return;}
 
   document.getElementById('sub-btn').disabled=true;
   document.getElementById('rbox').classList.remove('show');
@@ -464,7 +537,13 @@ async function run(){
   try{
     const fd=new FormData();
     fd.append('template',tmplFile);
-    if(dsFile)fd.append('datasheet',dsFile);
+
+    // Data sheets
+    dsSlots.forEach((slotIdx,pos)=>{
+      const file=document.getElementById('dsf'+slotIdx)?.files[0];
+      if(file) fd.append(pos===0?'datasheet':`datasheet_${pos+1}`,file);
+    });
+    fd.append('datasheet_count',dsSlots.length);
 
     vendorSlots.forEach((slotIdx,pos)=>{
       const name=document.getElementById('vn'+slotIdx)?.value||`Vendor ${pos+1}`;
@@ -552,6 +631,13 @@ def generate():
     ds = request.files.get("datasheet")
     if ds and ds.filename:
         content += f"=== DATA SHEET ({ds.filename}) ===\n{extract_text(ds)}\n\n"
+
+    # Support additional data sheets (datasheet_2, datasheet_3, etc.)
+    ds_count = int(request.form.get("datasheet_count", 1))
+    for i in range(2, ds_count + 1):
+        dsi = request.files.get(f"datasheet_{i}")
+        if dsi and dsi.filename:
+            content += f"=== DATA SHEET {i} ({dsi.filename}) ===\n{extract_text(dsi)}\n\n"
 
     vendor_count = int(request.form.get("vendor_count", 3))
     for i in range(1, vendor_count + 1):
