@@ -354,21 +354,24 @@ HTML = r"""<!DOCTYPE html>
 :root{
   --ink:#0f1117;--ink2:#3a3d4a;--ink3:#6b7080;
   --line:#e2e4ea;--line2:#c8cad4;--bg:#f7f8fa;--bg2:#fff;
-  --accent:#1a56db;--accent2:#ddeaff;
+  --accent:#e8286a;--accent2:#fdedf4;
+  --accent-warm:#f5a623;
   --green:#0d6e3b;--gbg:#e6f4ed;
   --red:#9b1c1c;--rbg:#fde8e8;
   --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;}
-.topbar{background:var(--ink);color:#fff;height:54px;padding:0 36px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
-.brand{font-family:var(--mono);font-size:13px;letter-spacing:.06em;}
-.brand em{color:#6b9fff;font-style:normal;}
-.badge{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.6);}
+.topbar{background:var(--ink);color:#fff;height:58px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(255,255,255,.06);}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand img{height:34px;width:auto;display:block;}
+.brand-name{font-family:var(--sans);font-size:15px;font-weight:500;color:#fff;letter-spacing:.01em;}
+.brand-name span{color:rgba(255,255,255,.38);font-weight:300;font-size:12px;margin-left:6px;letter-spacing:.04em;}
+.badge{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.5);}
 .page{max-width:780px;margin:0 auto;padding:36px 20px 80px;}
 .card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;margin-bottom:18px;overflow:hidden;}
 .ch{padding:15px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;}
-.ch-ico{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-family:var(--mono);font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:500;}
+.ch-ico{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent-warm),var(--accent));color:#fff;font-family:var(--mono);font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:500;}
 .ch h2{font-size:14px;font-weight:600;margin-bottom:2px;}
 .ch p{font-size:11px;color:var(--ink3);}
 .cb{padding:18px 22px;}
@@ -385,9 +388,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 .fchip{display:inline-flex;align-items:center;gap:6px;background:var(--gbg);border:1px solid #a3d9b8;color:var(--green);border-radius:6px;padding:4px 10px;font-family:var(--mono);font-size:11px;margin-top:6px;}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
 .vcard{border:1px solid var(--line2);border-radius:10px;overflow:hidden;}
-.vcard.loaded{border-color:#a3d9b8;}
+.vcard.loaded{border-color:#f5a19d;}
 .vhead{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between;}
-.vhead.loaded{background:var(--gbg);color:var(--green);border-bottom-color:#a3d9b8;}
+.vhead.loaded{background:#fff5f8;color:var(--accent);border-bottom-color:#f5a19d;}
 .vremove{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;border-radius:3px;font-family:var(--sans);}
 .vremove:hover{color:var(--red);background:var(--rbg);}
 .vbody{padding:11px 12px;background:var(--bg2);}
@@ -399,9 +402,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 .add-vbtn{display:block;width:100%;margin-top:10px;padding:8px;background:var(--bg2);border:1px dashed var(--line2);border-radius:8px;color:var(--ink3);font-size:12px;cursor:pointer;font-family:var(--sans);transition:all .15s;}
 .add-vbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent2);}
 .sub-area{margin-top:24px;text-align:center;}
-.sub-btn{background:var(--accent);color:#fff;border:none;padding:13px 42px;border-radius:8px;font-size:15px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:background .15s;}
-.sub-btn:hover{background:#1448c0;}
-.sub-btn:disabled{background:#aaa;cursor:not-allowed;}
+.sub-btn{background:linear-gradient(135deg,var(--accent-warm),var(--accent));color:#fff;border:none;padding:13px 42px;border-radius:8px;font-size:15px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:opacity .15s;}
+.sub-btn:hover{opacity:.88;}
+.sub-btn:disabled{background:linear-gradient(135deg,#ccc,#aaa);cursor:not-allowed;opacity:1;}
 .sub-note{font-size:11px;color:var(--ink3);margin-top:8px;}
 .rbox{background:var(--gbg);border:1px solid #a3d9b8;border-radius:10px;padding:22px;margin-top:22px;display:none;text-align:center;}
 .rbox.show{display:block;}
@@ -424,7 +427,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">AI Agent</span></div>
+  <div class="brand">
+    <img src="/static/logo.png" alt="Logo">
+    <span class="brand-name">Bid Tab Agent<span>AI</span></span>
+  </div>
   <div class="badge" id="badge">Ready</div>
 </div>
 <div class="page">
