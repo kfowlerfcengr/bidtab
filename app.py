@@ -488,6 +488,8 @@ function dsfile(inp,idx){
 }
 
 (function initDS(){addDataSheet();}());
+
+let vendorSlots=[];
 let nextVIdx=0;
 
 function makeVendorCard(idx,displayNum){
