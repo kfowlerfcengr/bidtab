@@ -32,11 +32,27 @@ def build_row_map(ws):
         label = str(label_cell.value or "").strip()
         if not label or label.lower() in ("none", ""):
             continue
+
         key = label.lower()
         key = re.sub(r'[^a-z0-9\s]', '', key)
         key = re.sub(r'\s+', '_', key.strip())
         key = re.sub(r'^_+|_+$', '', key)
         key = re.sub(r'_+', '_', key)
+
+        # Skip known section header / divider rows
+        SECTION_PREFIXES = (
+            "technical_commercial_bid_tab", "technical_bid_comparison",
+            "basic_description", "pump_performance", "construction",
+            "special_requ", "seal_plans", "materials", "motor_driver",
+            "inspection_and_testing", "site_data", "other", "adders",
+            "commercial_bid_comparison", "pricing",
+            "commercial_recommendation", "technical_recommendation",
+            "payment", "delivery", "misc", "lead_time",
+            "recommendationacceptability", "notes",
+        )
+        if any(key == p or key.startswith(p) for p in SECTION_PREFIXES):
+            continue
+
         if key:
             row_map[label_cell.row] = key
     return row_map
@@ -137,13 +153,15 @@ def fill_excel(template_bytes, data, pi):
                 if curr is None or str(curr).strip() in ("","-","By Vendor","N/A","by vendor","n/a"):
                     cell.fill = YELLOW
 
-    # TOTAL formula
+    # TOTAL formula — find the total row and the two price rows above it
     for row_num, field in row_map.items():
         if field == "total":
             for col in ("C","D","E"):
                 cell = ws[f"{col}{row_num}"]
                 if not isinstance(cell, MergedCell):
-                    cell.value = f"=SUM({col}{row_num-10}:{col}{row_num-1})"
+                    # Find quantity row (labeled "quantity") for the multiplier
+                    qty_row = next((r for r, f in row_map.items() if f == "quantity"), row_num - 2)
+                    cell.value = f"=SUM({col}{row_num-5}:{col}{row_num-1})*{col}{qty_row}"
 
     out = io.BytesIO()
     wb.save(out)
@@ -237,7 +255,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <div class="topbar">
   <div class="brand">
     <img src="/static/logo.png?v=3" alt="F&C Engineers">
-    <span class="brand-name">Bid Tab Agent</span></span>
+    <span class="brand-name">Bid Tab Agent<span>AI</span></span>
   </div>
   <div class="badge" id="badge">Ready</div>
 </div>
@@ -537,6 +555,14 @@ def download(fname):
     return send_file(fpath, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Not found"}), 404
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
