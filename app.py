@@ -24,7 +24,39 @@ def is_numeric_field(key):
     return any(kw in key for kw in NUMERIC_KEYWORDS)
 
 def build_row_map(ws):
+    """
+    Build {row_number: field_key} by reading col A labels.
+    Tracks current section to disambiguate duplicate labels
+    (e.g. 'Pump & Motor' appears under both Pricing and Lead Time).
+    """
     row_map = {}
+
+    # Section header labels — exact matches only, not startswith
+    SECTION_MARKERS = {
+        "technical_commercial_bid_tab", "technical_bid_comparison",
+        "basic_description", "pump_performance", "construction",
+        "special_requirements", "special_requirments", "seal_plans",
+        "motor_driver", "inspection_and_testing", "site_data",
+        "other", "adders", "commercial_bid_comparison", "pricing",
+        "commercial_recommendationacceptability",
+        "technical_recommendationacceptability",
+        "commercial_recommendation_acceptability",
+        "technical_recommendation_acceptability",
+        "recommendationacceptability", "lead_time",
+        "payment", "delivery", "misc", "materials",
+    }
+
+    # Section prefix to prepend when disambiguating duplicate labels
+    SECTION_PREFIX_MAP = {
+        "pricing":   "price",
+        "lead_time": "leadtime",
+        "payment":   "payment",
+        "delivery":  "delivery",
+        "adders":    "adder",
+    }
+
+    current_section = ""
+
     for row in ws.iter_rows():
         label_cell = row[0] if row else None
         if not label_cell or isinstance(label_cell, MergedCell):
@@ -39,22 +71,25 @@ def build_row_map(ws):
         key = re.sub(r'^_+|_+$', '', key)
         key = re.sub(r'_+', '_', key)
 
-        # Skip known section header / divider rows
-        SECTION_PREFIXES = (
-            "technical_commercial_bid_tab", "technical_bid_comparison",
-            "basic_description", "pump_performance", "construction",
-            "special_requ", "seal_plans", "materials", "motor_driver",
-            "inspection_and_testing", "site_data", "other", "adders",
-            "commercial_bid_comparison", "pricing",
-            "commercial_recommendation", "technical_recommendation",
-            "payment", "delivery", "misc", "lead_time",
-            "recommendationacceptability", "notes",
-        )
-        if any(key == p or key.startswith(p) for p in SECTION_PREFIXES):
+        # Check if this is a section marker — update context but don't map
+        if key in SECTION_MARKERS:
+            # Update current section if it's a known context section
+            for sec in SECTION_PREFIX_MAP:
+                if key.startswith(sec) or key == sec:
+                    current_section = sec
+                    break
             continue
+
+        # Disambiguate duplicate labels using section context
+        if current_section in SECTION_PREFIX_MAP:
+            prefix = SECTION_PREFIX_MAP[current_section]
+            # Don't prefix quantity — it's not a price field
+            if key != "quantity" and not key.startswith(prefix):
+                key = f"{prefix}_{key}"
 
         if key:
             row_map[label_cell.row] = key
+
     return row_map
 
 def build_system_prompt(row_map):
@@ -72,15 +107,30 @@ Return this exact structure:
   "vendor3": {{ ...fields from vendor 3... }}
 }}
 
-The template has these field keys — extract values for as many as you can find:
+The template has these exact field keys — use these names precisely:
 {field_list}
+
+IMPORTANT field naming rules (fields are prefixed by their section):
+- "price_pump_motor" = the unit price for pump & motor (a number, no $ or commas)
+- "price_vfd" = VFD price (number or null)
+- "quantity" = number of units being purchased (integer)
+- "leadtime_pump_motor" = pump & motor lead time (e.g. "12-14 Weeks")
+- "payment_payment_terms" = payment terms (e.g. "Net 30")
+- "payment_payment_schedule_progress_payments" = payment schedule details
+- "delivery_manufacturing_location" = where the equipment is made
+- "delivery_delivery_terms_incoterms" = INCOTERMS (e.g. "FOB Origin")
+- "delivery_delivery_location" = where it ships to
+- "warranty" = warranty terms
+- "adder_*" fields = optional add-on pricing (numbers only)
+- "comments" = any additional notes
 
 Rules:
 - datasheet key = values from the DATA SHEET only
-- vendor1/2/3 = values from each vendor quote
-- Any field containing "price", "cost", "qty", "quantity", "total", "amount", or "adder" must be a number (no $ or commas) or null
+- vendor1/2/3 = values from each vendor quote only
+- price_*, quantity, adder_* fields must be numbers (no $ or commas) or null
+- quantity is per vendor — extract the number of units each vendor is quoting
 - null for any field not found
-- Be thorough — extract every spec, price, note, and commercial term you can find
+- Be thorough — extract every spec, price, note, and commercial term
 - Return ONLY the JSON object"""
 
 def extract_text(file_storage) -> str:
@@ -141,6 +191,8 @@ def fill_excel(template_bytes, data, pi):
     # Data rows — dynamic, works for any template
     col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
     for row_num, field in row_map.items():
+        if row_num <= 7:
+            continue  # header rows handled above, don't overwrite
         for src, col in col_map.items():
             val = coerce((data.get(src) or {}).get(field), field)
             cell = ws[f"{col}{row_num}"]
