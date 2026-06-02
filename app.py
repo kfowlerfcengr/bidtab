@@ -364,7 +364,7 @@ HTML = r"""<!DOCTYPE html>
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;}
 .topbar{background:var(--ink);color:#fff;height:58px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(255,255,255,.06);}
 .brand{display:flex;align-items:center;gap:10px;}
-.brand img{height:34px;width:auto;display:block;}
+.brand img{height:34px;width:auto;display:block;mix-blend-mode:screen;}
 .brand-name{font-family:var(--sans);font-size:15px;font-weight:500;color:#fff;letter-spacing:.01em;}
 .brand-name span{color:rgba(255,255,255,.38);font-weight:300;font-size:12px;margin-left:6px;letter-spacing:.04em;}
 .badge{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.5);}
@@ -428,7 +428,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <body>
 <div class="topbar">
   <div class="brand">
-    <img src="/static/logo.png" alt="Logo">
+    <img src="/static/logo.png?v=2" alt="Logo">
     <span class="brand-name">Bid Tab Agent<span>AI</span></span>
   </div>
   <div class="badge" id="badge">Ready</div>
