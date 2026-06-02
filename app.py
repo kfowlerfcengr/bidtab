@@ -370,7 +370,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <div class="overlay" id="overlay">
   <div class="pbox">
     <div class="spin"></div>
-    <h3>AI is working…</h3>
+    <h3>Working on it…</h3>
     <p id="pmsg">Reading your files</p>
     <div class="pstep" id="pstep"></div>
   </div>
