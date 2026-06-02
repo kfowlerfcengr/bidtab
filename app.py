@@ -18,10 +18,13 @@ OUTPUT_DIR = tempfile.mkdtemp(prefix="bidtab_")
 
 YELLOW = PatternFill("solid", fgColor="FFFF00")
 
-NUMERIC_KEYWORDS = ["price","cost","qty","quantity","total","amount","adder","witnessed","test_cert","fee"]
+NUMERIC_KEYWORDS = ["price","cost","qty","quantity","price_total","amount","adder","witnessed","test_cert","fee"]
 
 def is_numeric_field(key):
-    return any(kw in key for kw in NUMERIC_KEYWORDS)
+    # Only match price_total exactly, not any field containing "total"
+    if key == "price_total" or key.endswith("_price_total"):
+        return True
+    return any(kw in key for kw in NUMERIC_KEYWORDS if kw != "price_total")
 
 def build_row_map(ws):
     """
@@ -209,7 +212,10 @@ Extraction rules:
 - "datasheet" key = combined values from ALL DATA SHEETS only
 - "vendor1/2/3/n" = values from each vendor quote only — never mix sources
 - All price/adder/quantity fields must be plain numbers (no $, commas, or units) or null
+- For price fields: use the EXACT unit price from the quote line item — do NOT add prices together or calculate totals
+- For lead times: if a vendor gives one lead time for all items, repeat it for each item field. If not stated at all, use null
 - Use context clues for quantity if a vendor doesn't explicitly state it
+- For dimension fields (length, weight, diameter etc.): preserve decimal precision exactly — never round 26.5 to 26
 - null for any field not found — do NOT fabricate or guess information
 - Extract every spec, technical parameter, price, commercial term, and note you can find
 - Return ONLY the JSON object, nothing else"""
