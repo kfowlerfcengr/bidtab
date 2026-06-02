@@ -268,7 +268,8 @@ def resolve_cell(ws, addr):
     return cell  # fallback: unrecognised merge, try as-is
 
 
-def fill_excel(template_bytes, data, pi):
+def fill_excel(template_bytes, data, pi, vendor_count=3):
+    from openpyxl.utils import get_column_letter
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
 
@@ -283,24 +284,39 @@ def fill_excel(template_bytes, data, pi):
             print(f"  row {r:3d} | A={repr(av)!s:45s} | B={repr(bv)}")
     print("=====================================================\n")
 
-    # Header
+    # Build dynamic column map: datasheet→B, vendor1→C, vendor2→D, vendor3→E, vendor4→F …
+    # Column index: datasheet=2(B), vendor1=3(C), vendor2=4(D), …
+    col_map = {"datasheet": "B"}
+    vendor_cols = []  # column letters for all vendor columns
+    for i in range(1, vendor_count + 1):
+        col_letter = get_column_letter(2 + i)   # i=1→C(3), i=2→D(4), …
+        col_map[f"vendor{i}"] = col_letter
+        vendor_cols.append(col_letter)
+
+    # Header — fixed project info fields
     for addr, val in {
         "C2": pi.get("client",""), "C3": pi.get("project_no",""),
         "C4": pi.get("project_name",""),
         "E4": datetime.today().strftime("%m/%d/%Y"),
         "C5": pi.get("location",""), "F5": pi.get("author",""),
         "B7": pi.get("equipment",""),
-        "C7": pi.get("vendor1_name","Vendor 1"),
-        "D7": pi.get("vendor2_name","Vendor 2"),
-        "E7": pi.get("vendor3_name","Vendor 3"),
     }.items():
         if val:
             c = resolve_cell(ws, addr)
             if c is not None:
                 c.value = val
 
+    # Write vendor names into row 7 (C7, D7, E7, F7 …)
+    for i in range(1, vendor_count + 1):
+        col_letter = get_column_letter(2 + i)
+        addr = f"{col_letter}7"
+        name = pi.get(f"vendor{i}_name", f"Vendor {i}")
+        if name:
+            c = resolve_cell(ws, addr)
+            if c is not None:
+                c.value = name
+
     # Data rows
-    col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
     for row, field in ROW_MAP.items():
         for src, col in col_map.items():
             val = coerce((data.get(src) or {}).get(field), field)
@@ -310,13 +326,13 @@ def fill_excel(template_bytes, data, pi):
                 continue  # horizontally-merged cell — do not corrupt another column
             if val is not None:
                 cell.value = val
-            elif col in ("C","D","E"):
+            elif col in vendor_cols:
                 curr = cell.value
                 if curr is None or str(curr).strip() in ("","-","By Vendor","N/A"):
                     cell.fill = YELLOW
 
-    # TOTAL formulas
-    for col in ("C","D","E"):
+    # TOTAL formulas for all vendor columns
+    for col in vendor_cols:
         c = resolve_cell(ws, f"{col}105")
         if c is not None:
             c.value = f"=SUM({col}100:{col}101)*{col}103"
@@ -367,17 +383,21 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 .uz h4{font-size:13px;font-weight:500;margin-bottom:2px;}
 .uz p{font-size:11px;color:var(--ink3);}
 .fchip{display:inline-flex;align-items:center;gap:6px;background:var(--gbg);border:1px solid #a3d9b8;color:var(--green);border-radius:6px;padding:4px 10px;font-family:var(--mono);font-size:11px;margin-top:6px;}
-.vgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
 .vcard{border:1px solid var(--line2);border-radius:10px;overflow:hidden;}
 .vcard.loaded{border-color:#a3d9b8;}
-.vhead{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;}
+.vhead{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between;}
 .vhead.loaded{background:var(--gbg);color:var(--green);border-bottom-color:#a3d9b8;}
+.vremove{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;border-radius:3px;font-family:var(--sans);}
+.vremove:hover{color:var(--red);background:var(--rbg);}
 .vbody{padding:11px 12px;background:var(--bg2);}
 .vbody input{width:100%;border:1px solid var(--line2);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans);color:var(--ink);outline:none;margin-bottom:8px;}
 .vbody input:focus{border-color:var(--accent);}
 .vup{width:100%;padding:7px;border:1px dashed var(--line2);border-radius:6px;background:var(--bg);font-size:11px;color:var(--ink3);cursor:pointer;text-align:center;font-family:var(--sans);transition:all .15s;}
 .vup:hover{border-color:var(--accent);color:var(--accent);background:var(--accent2);}
 .vfname{font-family:var(--mono);font-size:10px;color:var(--green);margin-top:5px;min-height:13px;}
+.add-vbtn{display:block;width:100%;margin-top:10px;padding:8px;background:var(--bg2);border:1px dashed var(--line2);border-radius:8px;color:var(--ink3);font-size:12px;cursor:pointer;font-family:var(--sans);transition:all .15s;}
+.add-vbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent2);}
 .sub-area{margin-top:24px;text-align:center;}
 .sub-btn{background:var(--accent);color:#fff;border:none;padding:13px 42px;border-radius:8px;font-size:15px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:background .15s;}
 .sub-btn:hover{background:#1448c0;}
@@ -451,32 +471,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   <div class="card">
     <div class="ch"><div class="ch-ico">3</div><div><h2>Vendor Quotes</h2><p>Any format, any layout — AI figures it out</p></div></div>
     <div class="cb">
-      <div class="vgrid">
-        <div class="vcard" id="vc0"><div class="vhead" id="vh0">Vendor 1</div>
-          <div class="vbody">
-            <input id="vn0" placeholder="Vendor name" value="Vendor 1" oninput="document.getElementById('vh0').textContent=this.value||'Vendor 1'">
-            <div class="vup" onclick="document.getElementById('vf0').click()">+ Attach quote</div>
-            <input type="file" id="vf0" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,0)">
-            <div class="vfname" id="vfn0"></div>
-          </div>
-        </div>
-        <div class="vcard" id="vc1"><div class="vhead" id="vh1">Vendor 2</div>
-          <div class="vbody">
-            <input id="vn1" placeholder="Vendor name" value="Vendor 2" oninput="document.getElementById('vh1').textContent=this.value||'Vendor 2'">
-            <div class="vup" onclick="document.getElementById('vf1').click()">+ Attach quote</div>
-            <input type="file" id="vf1" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,1)">
-            <div class="vfname" id="vfn1"></div>
-          </div>
-        </div>
-        <div class="vcard" id="vc2"><div class="vhead" id="vh2">Vendor 3</div>
-          <div class="vbody">
-            <input id="vn2" placeholder="Vendor name" value="Vendor 3" oninput="document.getElementById('vh2').textContent=this.value||'Vendor 3'">
-            <div class="vup" onclick="document.getElementById('vf2').click()">+ Attach quote</div>
-            <input type="file" id="vf2" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,2)">
-            <div class="vfname" id="vfn2"></div>
-          </div>
-        </div>
-      </div>
+      <div class="vgrid" id="vgrid"></div>
+      <button type="button" class="add-vbtn" onclick="addVendor()">+ Add Vendor</button>
     </div>
   </div>
 
@@ -503,18 +499,75 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </div>
 
 <script>
+/* ── Drag-drop / chip helpers ── */
 function zo(e,id){e.preventDefault();document.getElementById(id).classList.add('drag');}
 function zl(id){document.getElementById(id).classList.remove('drag');}
 function zd(e,zid,fid){e.preventDefault();zl(zid);const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById(fid);const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;chip(inp,fid==='f-ds'?'chip-ds':fid==='f-tmpl'?'chip-tmpl':null);}
 function chip(inp,chipId){const f=inp.files[0];if(!f||!chipId)return;document.getElementById(chipId).innerHTML=`<div class="fchip">✓ ${f.name}</div>`;}
-function vfile(inp,idx){const f=inp.files[0];if(!f)return;document.getElementById('vfn'+idx).textContent='✓ '+f.name;document.getElementById('vc'+idx).classList.add('loaded');document.getElementById('vh'+idx).classList.add('loaded');}
 
+/* ── Dynamic vendor slots ── */
+let vendorSlots=[];   // ordered array of slot indices currently shown
+let nextVIdx=0;       // ever-increasing unique id for new slots
+
+function makeVendorCard(idx,displayNum){
+  const div=document.createElement('div');
+  div.className='vcard';div.id='vc'+idx;
+  div.innerHTML=`
+    <div class="vhead" id="vh${idx}">
+      <span id="vhl${idx}">Vendor ${displayNum}</span>
+      <button type="button" class="vremove" id="vrm${idx}" onclick="removeVendor(${idx})" title="Remove vendor">×</button>
+    </div>
+    <div class="vbody">
+      <input id="vn${idx}" placeholder="Vendor name" value="Vendor ${displayNum}"
+             oninput="document.getElementById('vhl${idx}').textContent=this.value||'Vendor ${displayNum}'">
+      <div class="vup" onclick="document.getElementById('vf${idx}').click()">+ Attach quote</div>
+      <input type="file" id="vf${idx}" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf"
+             onchange="vfile(this,${idx})">
+      <div class="vfname" id="vfn${idx}"></div>
+    </div>`;
+  return div;
+}
+
+function addVendor(){
+  const idx=nextVIdx++;
+  vendorSlots.push(idx);
+  document.getElementById('vgrid').appendChild(makeVendorCard(idx,vendorSlots.length));
+  syncRemoveButtons();
+}
+
+function removeVendor(idx){
+  if(vendorSlots.length<=1)return;
+  vendorSlots=vendorSlots.filter(i=>i!==idx);
+  const card=document.getElementById('vc'+idx);
+  if(card)card.remove();
+  syncRemoveButtons();
+}
+
+function syncRemoveButtons(){
+  const show=vendorSlots.length>1;
+  vendorSlots.forEach(i=>{
+    const btn=document.getElementById('vrm'+i);
+    if(btn)btn.style.visibility=show?'visible':'hidden';
+  });
+}
+
+function vfile(inp,idx){
+  const f=inp.files[0];if(!f)return;
+  document.getElementById('vfn'+idx).textContent='✓ '+f.name;
+  document.getElementById('vc'+idx).classList.add('loaded');
+  document.getElementById('vh'+idx).classList.add('loaded');
+}
+
+/* Start with 3 vendor slots */
+(function initVendors(){for(let i=0;i<3;i++)addVendor();}());
+
+/* ── Main generate ── */
 async function run(){
   const tmplFile=document.getElementById('f-tmpl').files[0];
   if(!tmplFile){alert('Please upload your bid tab template (.xlsx).');return;}
   const dsFile=document.getElementById('f-ds').files[0];
-  const vFiles=[0,1,2].map(i=>document.getElementById('vf'+i).files[0]||null);
-  if(!dsFile&&!vFiles.some(Boolean)){alert('Please upload at least a data sheet or one vendor quote.');return;}
+  const hasVendor=vendorSlots.some(i=>document.getElementById('vf'+i)?.files[0]);
+  if(!dsFile&&!hasVendor){alert('Please upload at least a data sheet or one vendor quote.');return;}
 
   document.getElementById('sub-btn').disabled=true;
   document.getElementById('rbox').classList.remove('show');
@@ -524,16 +577,26 @@ async function run(){
 
   const msgs=['Reading files…','AI extracting specs…','Mapping vendor data…','Writing Excel…'];
   let mi=0;
-  const ticker=setInterval(()=>{document.getElementById('pmsg').textContent=msgs[Math.min(mi,msgs.length-1)];document.getElementById('pstep').textContent=`Step ${Math.min(mi+1,4)} of 4`;mi++;},5000);
+  const ticker=setInterval(()=>{
+    document.getElementById('pmsg').textContent=msgs[Math.min(mi,msgs.length-1)];
+    document.getElementById('pstep').textContent=`Step ${Math.min(mi+1,4)} of 4`;
+    mi++;
+  },5000);
 
   try{
     const fd=new FormData();
     fd.append('template',tmplFile);
     if(dsFile)fd.append('datasheet',dsFile);
-    [0,1,2].forEach(i=>{
-      fd.append(`vendor_name_${i+1}`,document.getElementById('vn'+i).value||`Vendor ${i+1}`);
-      if(vFiles[i])fd.append(`vendor_${i+1}`,vFiles[i]);
+
+    /* Submit all vendor slots in display order */
+    vendorSlots.forEach((slotIdx,pos)=>{
+      const name=document.getElementById('vn'+slotIdx)?.value||`Vendor ${pos+1}`;
+      const file=document.getElementById('vf'+slotIdx)?.files[0];
+      fd.append(`vendor_name_${pos+1}`,name);
+      if(file)fd.append(`vendor_${pos+1}`,file);
     });
+    fd.append('vendor_count',vendorSlots.length);
+
     fd.append('client',document.getElementById('pi-client').value);
     fd.append('project_no',document.getElementById('pi-projno').value);
     fd.append('project_name',document.getElementById('pi-name').value);
@@ -551,7 +614,7 @@ async function run(){
     if(result.error){
       document.getElementById('emsg').textContent='Error: '+result.error;
       document.getElementById('ebox').classList.add('show');
-    } else {
+    }else{
       document.getElementById('rmsg').textContent=result.message;
       document.getElementById('dl-link').href='/download/'+result.filename;
       document.getElementById('dl-link').download=result.filename;
@@ -588,6 +651,10 @@ def generate():
 
     template_bytes = template_file.read()
 
+    # Detect how many vendor slots were submitted
+    vendor_count = int(request.form.get("vendor_count", 3))
+    vendor_count = max(1, min(vendor_count, 10))  # clamp 1-10
+
     pi = {
         "client":       request.form.get("client", ""),
         "project_no":   request.form.get("project_no", ""),
@@ -595,10 +662,9 @@ def generate():
         "location":     request.form.get("location", ""),
         "equipment":    request.form.get("equipment", ""),
         "author":       request.form.get("author", ""),
-        "vendor1_name": request.form.get("vendor_name_1", "Vendor 1"),
-        "vendor2_name": request.form.get("vendor_name_2", "Vendor 2"),
-        "vendor3_name": request.form.get("vendor_name_3", "Vendor 3"),
     }
+    for i in range(1, vendor_count + 1):
+        pi[f"vendor{i}_name"] = request.form.get(f"vendor_name_{i}", f"Vendor {i}")
 
     # Build content for Claude
     content = ""
@@ -606,11 +672,13 @@ def generate():
     if ds and ds.filename:
         content += f"=== DATA SHEET ({ds.filename}) ===\n{extract_text(ds)}\n\n"
 
-    for i in (1, 2, 3):
+    vendors_present = []
+    for i in range(1, vendor_count + 1):
         vf = request.files.get(f"vendor_{i}")
-        vn = request.form.get(f"vendor_name_{i}", f"Vendor {i}")
+        vn = pi.get(f"vendor{i}_name", f"Vendor {i}")
         if vf and vf.filename:
             content += f"=== VENDOR {i} — {vn} ({vf.filename}) ===\n{extract_text(vf)}\n\n"
+            vendors_present.append(i)
 
     if not content.strip():
         return jsonify({"error": "No data sheet or vendor quotes uploaded."})
@@ -633,7 +701,8 @@ def generate():
             data = json.loads(_repair_json(raw))
         # Log extraction summary for debugging
         print("\n=== AI EXTRACTION SUMMARY ===")
-        for src in ("datasheet","vendor1","vendor2","vendor3"):
+        all_srcs = ["datasheet"] + [f"vendor{i}" for i in range(1, vendor_count + 1)]
+        for src in all_srcs:
             src_data = data.get(src) or {}
             found = {k: v for k, v in src_data.items() if v is not None}
             print(f"  [{src}] {len(found)} fields filled: {list(found.keys())}")
@@ -645,7 +714,7 @@ def generate():
 
     # Fill Excel
     try:
-        xlsx_bytes = fill_excel(template_bytes, data, pi)
+        xlsx_bytes = fill_excel(template_bytes, data, pi, vendor_count=vendor_count)
     except Exception as e:
         return jsonify({"error": f"Excel error: {e}"})
 
@@ -657,9 +726,9 @@ def generate():
     with open(fpath, "wb") as f:
         f.write(xlsx_bytes)
 
-    vendors_used = [pi[k] for k in ("vendor1_name","vendor2_name","vendor3_name")
-                    if request.files.get(f"vendor_{('vendor1_name','vendor2_name','vendor3_name').index(k)+1}")]
-    msg = f"Filled from {len([x for x in [ds]+[request.files.get(f'vendor_{i}') for i in (1,2,3)] if x and x.filename])} files. Yellow cells = fields not found in vendor quote."
+    file_count = sum(1 for f in [ds] + [request.files.get(f"vendor_{i}") for i in range(1, vendor_count + 1)] if f and f.filename)
+    vendor_names = [pi.get(f"vendor{i}_name", f"Vendor {i}") for i in vendors_present]
+    msg = f"Filled from {file_count} file(s) across {len(vendors_present)} vendor(s). Yellow cells = fields not found in quote."
 
     return jsonify({"filename": fname, "message": msg})
 
