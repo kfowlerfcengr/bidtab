@@ -98,21 +98,10 @@ def coerce(val, field):
         except: return s
     return s
 
-def resolve_cell(ws, addr):
-    """Return the writable master cell for addr, resolving merged ranges."""
-    cell = ws[addr]
-    if not isinstance(cell, MergedCell):
-        return cell
-    for merge_range in ws.merged_cells.ranges:
-        if addr in merge_range:
-            return ws.cell(merge_range.min_row, merge_range.min_col)
-    return cell
-
 def fill_excel(template_bytes, data, pi):
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
 
-    # Dynamically build row map from this template's column A labels
     row_map = build_row_map(ws)
 
     def safe_write(addr, val):
@@ -121,7 +110,7 @@ def fill_excel(template_bytes, data, pi):
         if not isinstance(cell, MergedCell):
             cell.value = val
 
-    # ── Project header (hardcoded — same position in all F&C templates) ───
+    # Project header — hardcoded, same position in all F&C templates
     safe_write("C2", pi.get("client",""))
     safe_write("C3", pi.get("project_no",""))
     safe_write("C4", pi.get("project_name",""))
@@ -133,14 +122,14 @@ def fill_excel(template_bytes, data, pi):
     safe_write("D7", pi.get("vendor2_name","Vendor 2"))
     safe_write("E7", pi.get("vendor3_name","Vendor 3"))
 
-    # ── Data rows (dynamic — works for any template) ───────────────────────
+    # Data rows — dynamic, works for any template
     col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
     for row_num, field in row_map.items():
         for src, col in col_map.items():
             val = coerce((data.get(src) or {}).get(field), field)
-            addr = f"{col}{row_num}"
-            cell = resolve_cell(ws, addr)
-            if isinstance(cell, MergedCell): continue
+            cell = ws[f"{col}{row_num}"]
+            if isinstance(cell, MergedCell):
+                continue
             if val is not None:
                 cell.value = val
             elif col in ("C","D","E"):
@@ -148,13 +137,13 @@ def fill_excel(template_bytes, data, pi):
                 if curr is None or str(curr).strip() in ("","-","By Vendor","N/A","by vendor","n/a"):
                     cell.fill = YELLOW
 
-    # ── Restore TOTAL formula for any row labeled "total" ─────────────────
+    # TOTAL formula
     for row_num, field in row_map.items():
         if field == "total":
             for col in ("C","D","E"):
-                c = resolve_cell(ws, f"{col}{row_num}")
-                if not isinstance(c, MergedCell):
-                    c.value = f"=SUM({col}{row_num-10}:{col}{row_num-1})"
+                cell = ws[f"{col}{row_num}"]
+                if not isinstance(cell, MergedCell):
+                    cell.value = f"=SUM({col}{row_num-10}:{col}{row_num-1})"
 
     out = io.BytesIO()
     wb.save(out)
@@ -173,21 +162,24 @@ HTML = r"""<!DOCTYPE html>
 :root{
   --ink:#0f1117;--ink2:#3a3d4a;--ink3:#6b7080;
   --line:#e2e4ea;--line2:#c8cad4;--bg:#f7f8fa;--bg2:#fff;
-  --accent:#1a56db;--accent2:#ddeaff;
+  --accent:#e8286a;--accent2:#fdedf4;
+  --accent-warm:#f5a623;
   --green:#0d6e3b;--gbg:#e6f4ed;
   --red:#9b1c1c;--rbg:#fde8e8;
   --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;}
-.topbar{background:var(--ink);color:#fff;height:54px;padding:0 36px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
-.brand{font-family:var(--mono);font-size:13px;letter-spacing:.06em;}
-.brand em{color:#6b9fff;font-style:normal;}
-.badge{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.6);}
+.topbar{background:var(--ink);color:#fff;height:58px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(255,255,255,.06);}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand img{height:34px;width:auto;display:block;mix-blend-mode:screen;}
+.brand-name{font-family:var(--sans);font-size:15px;font-weight:500;color:#fff;letter-spacing:.01em;}
+.brand-name span{color:rgba(255,255,255,.38);font-weight:300;font-size:12px;margin-left:6px;letter-spacing:.04em;}
+.badge{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.5);}
 .page{max-width:780px;margin:0 auto;padding:36px 20px 80px;}
 .card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;margin-bottom:18px;overflow:hidden;}
 .ch{padding:15px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;}
-.ch-ico{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-family:var(--mono);font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:500;}
+.ch-ico{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent-warm),var(--accent));color:#fff;font-family:var(--mono);font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:500;}
 .ch h2{font-size:14px;font-weight:600;margin-bottom:2px;}
 .ch p{font-size:11px;color:var(--ink3);}
 .cb{padding:18px 22px;}
@@ -202,21 +194,25 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 .uz h4{font-size:13px;font-weight:500;margin-bottom:2px;}
 .uz p{font-size:11px;color:var(--ink3);}
 .fchip{display:inline-flex;align-items:center;gap:6px;background:var(--gbg);border:1px solid #a3d9b8;color:var(--green);border-radius:6px;padding:4px 10px;font-family:var(--mono);font-size:11px;margin-top:6px;}
-.vgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
 .vcard{border:1px solid var(--line2);border-radius:10px;overflow:hidden;}
-.vcard.loaded{border-color:#a3d9b8;}
-.vhead{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;}
-.vhead.loaded{background:var(--gbg);color:var(--green);border-bottom-color:#a3d9b8;}
+.vcard.loaded{border-color:#f5a19d;}
+.vhead{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between;}
+.vhead.loaded{background:#fff5f8;color:var(--accent);border-bottom-color:#f5a19d;}
+.vremove{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;border-radius:3px;font-family:var(--sans);}
+.vremove:hover{color:var(--red);background:var(--rbg);}
 .vbody{padding:11px 12px;background:var(--bg2);}
 .vbody input{width:100%;border:1px solid var(--line2);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans);color:var(--ink);outline:none;margin-bottom:8px;}
 .vbody input:focus{border-color:var(--accent);}
 .vup{width:100%;padding:7px;border:1px dashed var(--line2);border-radius:6px;background:var(--bg);font-size:11px;color:var(--ink3);cursor:pointer;text-align:center;font-family:var(--sans);transition:all .15s;}
 .vup:hover{border-color:var(--accent);color:var(--accent);background:var(--accent2);}
 .vfname{font-family:var(--mono);font-size:10px;color:var(--green);margin-top:5px;min-height:13px;}
+.add-vbtn{display:block;width:100%;margin-top:10px;padding:8px;background:var(--bg2);border:1px dashed var(--line2);border-radius:8px;color:var(--ink3);font-size:12px;cursor:pointer;font-family:var(--sans);transition:all .15s;}
+.add-vbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent2);}
 .sub-area{margin-top:24px;text-align:center;}
-.sub-btn{background:var(--accent);color:#fff;border:none;padding:13px 42px;border-radius:8px;font-size:15px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:background .15s;}
-.sub-btn:hover{background:#1448c0;}
-.sub-btn:disabled{background:#aaa;cursor:not-allowed;}
+.sub-btn{background:linear-gradient(135deg,var(--accent-warm),var(--accent));color:#fff;border:none;padding:13px 42px;border-radius:8px;font-size:15px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:opacity .15s;}
+.sub-btn:hover{opacity:.88;}
+.sub-btn:disabled{background:linear-gradient(135deg,#ccc,#aaa);cursor:not-allowed;opacity:1;}
 .sub-note{font-size:11px;color:var(--ink3);margin-top:8px;}
 .rbox{background:var(--gbg);border:1px solid #a3d9b8;border-radius:10px;padding:22px;margin-top:22px;display:none;text-align:center;}
 .rbox.show{display:block;}
@@ -239,10 +235,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">AI Agent</span></div>
+  <div class="brand">
+    <img src="/static/logo.png?v=3" alt="F&C Engineers">
+    <span class="brand-name">Bid Tab Agent<span>AI</span></span>
+  </div>
   <div class="badge" id="badge">Ready</div>
 </div>
 <div class="page">
+
   <div class="card">
     <div class="ch"><div class="ch-ico">📁</div><div><h2>Project Info</h2><p>Fills the header of your bid tab</p></div></div>
     <div class="cb">
@@ -250,14 +250,15 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
         <div class="fld"><label>Client</label><input id="pi-client" placeholder="e.g. FTAI"></div>
         <div class="fld"><label>Project No.</label><input id="pi-projno" placeholder="e.g. FTA260107"></div>
         <div class="fld"><label>Project Name</label><input id="pi-name" placeholder="e.g. FTAI CFM56 Package"></div>
-        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile, AL"></div>
+        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile"></div>
         <div class="fld"><label>Equipment / Item</label><input id="pi-equip" placeholder="e.g. Pumps"></div>
         <div class="fld"><label>Author</label><input id="pi-author" placeholder="Your name"></div>
       </div>
     </div>
   </div>
+
   <div class="card">
-    <div class="ch"><div class="ch-ico">1</div><div><h2>Bid Tab Template</h2><p>Your blank .xlsx — formatting, colors and merges preserved exactly</p></div></div>
+    <div class="ch"><div class="ch-ico">1</div><div><h2>Bid Tab Template</h2><p>Your blank .xlsx — formatting, colors and merges will be preserved exactly</p></div></div>
     <div class="cb">
       <div class="uz" id="z-tmpl" onclick="document.getElementById('f-tmpl').click()"
            ondragover="zo(event,'z-tmpl')" ondragleave="zl('z-tmpl')" ondrop="zd(event,'z-tmpl','f-tmpl')">
@@ -268,8 +269,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
       </div>
     </div>
   </div>
+
   <div class="card">
-    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills col B (standards column)</p></div></div>
+    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills F&C standards column</p></div></div>
     <div class="cb">
       <div class="uz" id="z-ds" onclick="document.getElementById('f-ds').click()"
            ondragover="zo(event,'z-ds')" ondragleave="zl('z-ds')" ondrop="zd(event,'z-ds','f-ds')">
@@ -279,41 +281,20 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
       </div>
     </div>
   </div>
+
   <div class="card">
     <div class="ch"><div class="ch-ico">3</div><div><h2>Vendor Quotes</h2><p>Any format, any layout — AI figures it out</p></div></div>
     <div class="cb">
-      <div class="vgrid">
-        <div class="vcard" id="vc0"><div class="vhead" id="vh0">Vendor 1</div>
-          <div class="vbody">
-            <input id="vn0" placeholder="Vendor name" value="Vendor 1" oninput="document.getElementById('vh0').textContent=this.value||'Vendor 1'">
-            <div class="vup" onclick="document.getElementById('vf0').click()">+ Attach quote</div>
-            <input type="file" id="vf0" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,0)">
-            <div class="vfname" id="vfn0"></div>
-          </div>
-        </div>
-        <div class="vcard" id="vc1"><div class="vhead" id="vh1">Vendor 2</div>
-          <div class="vbody">
-            <input id="vn1" placeholder="Vendor name" value="Vendor 2" oninput="document.getElementById('vh1').textContent=this.value||'Vendor 2'">
-            <div class="vup" onclick="document.getElementById('vf1').click()">+ Attach quote</div>
-            <input type="file" id="vf1" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,1)">
-            <div class="vfname" id="vfn1"></div>
-          </div>
-        </div>
-        <div class="vcard" id="vc2"><div class="vhead" id="vh2">Vendor 3</div>
-          <div class="vbody">
-            <input id="vn2" placeholder="Vendor name" value="Vendor 3" oninput="document.getElementById('vh2').textContent=this.value||'Vendor 3'">
-            <div class="vup" onclick="document.getElementById('vf2').click()">+ Attach quote</div>
-            <input type="file" id="vf2" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf" onchange="vfile(this,2)">
-            <div class="vfname" id="vfn2"></div>
-          </div>
-        </div>
-      </div>
+      <div class="vgrid" id="vgrid"></div>
+      <button type="button" class="add-vbtn" onclick="addVendor()">+ Add Vendor</button>
     </div>
   </div>
+
   <div class="sub-area">
     <button class="sub-btn" id="sub-btn" onclick="run()">Generate Bid Tab</button>
     <div class="sub-note">Server reads your files with AI → returns a perfectly formatted .xlsx</div>
   </div>
+
   <div class="rbox" id="rbox">
     <h3>✓ Bid tab ready</h3>
     <p id="rmsg"></p>
@@ -321,58 +302,128 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   </div>
   <div class="ebox" id="ebox"><p id="emsg"></p></div>
 </div>
+
 <div class="overlay" id="overlay">
   <div class="pbox">
     <div class="spin"></div>
-    <h3>AI is working…</h3>
+    <h3>Working on it…</h3>
     <p id="pmsg">Reading your files</p>
     <div class="pstep" id="pstep"></div>
   </div>
 </div>
+
 <script>
 function zo(e,id){e.preventDefault();document.getElementById(id).classList.add('drag');}
 function zl(id){document.getElementById(id).classList.remove('drag');}
 function zd(e,zid,fid){e.preventDefault();zl(zid);const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById(fid);const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;chip(inp,fid==='f-ds'?'chip-ds':fid==='f-tmpl'?'chip-tmpl':null);}
 function chip(inp,chipId){const f=inp.files[0];if(!f||!chipId)return;document.getElementById(chipId).innerHTML=`<div class="fchip">✓ ${f.name}</div>`;}
-function vfile(inp,idx){const f=inp.files[0];if(!f)return;document.getElementById('vfn'+idx).textContent='✓ '+f.name;document.getElementById('vc'+idx).classList.add('loaded');document.getElementById('vh'+idx).classList.add('loaded');}
+
+let vendorSlots=[];
+let nextVIdx=0;
+
+function makeVendorCard(idx,displayNum){
+  const div=document.createElement('div');
+  div.className='vcard';div.id='vc'+idx;
+  div.innerHTML=`
+    <div class="vhead" id="vh${idx}">
+      <span id="vhl${idx}">Vendor ${displayNum}</span>
+      <button type="button" class="vremove" id="vrm${idx}" onclick="removeVendor(${idx})" title="Remove vendor">×</button>
+    </div>
+    <div class="vbody">
+      <input id="vn${idx}" placeholder="Vendor name" value="Vendor ${displayNum}"
+             oninput="document.getElementById('vhl${idx}').textContent=this.value||'Vendor ${displayNum}'">
+      <div class="vup" onclick="document.getElementById('vf${idx}').click()">+ Attach quote</div>
+      <input type="file" id="vf${idx}" style="display:none" accept=".xlsx,.xls,.csv,.txt,.pdf"
+             onchange="vfile(this,${idx})">
+      <div class="vfname" id="vfn${idx}"></div>
+    </div>`;
+  return div;
+}
+
+function addVendor(){
+  const idx=nextVIdx++;
+  vendorSlots.push(idx);
+  document.getElementById('vgrid').appendChild(makeVendorCard(idx,vendorSlots.length));
+  syncRemoveButtons();
+}
+
+function removeVendor(idx){
+  if(vendorSlots.length<=1)return;
+  vendorSlots=vendorSlots.filter(i=>i!==idx);
+  const card=document.getElementById('vc'+idx);
+  if(card)card.remove();
+  syncRemoveButtons();
+}
+
+function syncRemoveButtons(){
+  const show=vendorSlots.length>1;
+  vendorSlots.forEach(i=>{
+    const btn=document.getElementById('vrm'+i);
+    if(btn)btn.style.visibility=show?'visible':'hidden';
+  });
+}
+
+function vfile(inp,idx){
+  const f=inp.files[0];if(!f)return;
+  document.getElementById('vfn'+idx).textContent='✓ '+f.name;
+  document.getElementById('vc'+idx).classList.add('loaded');
+  document.getElementById('vh'+idx).classList.add('loaded');
+}
+
+(function initVendors(){for(let i=0;i<3;i++)addVendor();}());
+
 async function run(){
   const tmplFile=document.getElementById('f-tmpl').files[0];
   if(!tmplFile){alert('Please upload your bid tab template (.xlsx).');return;}
   const dsFile=document.getElementById('f-ds').files[0];
-  const vFiles=[0,1,2].map(i=>document.getElementById('vf'+i).files[0]||null);
-  if(!dsFile&&!vFiles.some(Boolean)){alert('Please upload at least a data sheet or one vendor quote.');return;}
+  const hasVendor=vendorSlots.some(i=>document.getElementById('vf'+i)?.files[0]);
+  if(!dsFile&&!hasVendor){alert('Please upload at least a data sheet or one vendor quote.');return;}
+
   document.getElementById('sub-btn').disabled=true;
   document.getElementById('rbox').classList.remove('show');
   document.getElementById('ebox').classList.remove('show');
   document.getElementById('overlay').classList.add('show');
   document.getElementById('badge').textContent='Processing…';
+
   const msgs=['Reading files…','AI extracting specs…','Mapping vendor data…','Writing Excel…'];
   let mi=0;
-  const ticker=setInterval(()=>{document.getElementById('pmsg').textContent=msgs[Math.min(mi,msgs.length-1)];document.getElementById('pstep').textContent=`Step ${Math.min(mi+1,4)} of 4`;mi++;},5000);
+  const ticker=setInterval(()=>{
+    document.getElementById('pmsg').textContent=msgs[Math.min(mi,msgs.length-1)];
+    document.getElementById('pstep').textContent=`Step ${Math.min(mi+1,4)} of 4`;
+    mi++;
+  },5000);
+
   try{
     const fd=new FormData();
     fd.append('template',tmplFile);
     if(dsFile)fd.append('datasheet',dsFile);
-    [0,1,2].forEach(i=>{
-      fd.append(`vendor_name_${i+1}`,document.getElementById('vn'+i).value||`Vendor ${i+1}`);
-      if(vFiles[i])fd.append(`vendor_${i+1}`,vFiles[i]);
+
+    vendorSlots.forEach((slotIdx,pos)=>{
+      const name=document.getElementById('vn'+slotIdx)?.value||`Vendor ${pos+1}`;
+      const file=document.getElementById('vf'+slotIdx)?.files[0];
+      fd.append(`vendor_name_${pos+1}`,name);
+      if(file)fd.append(`vendor_${pos+1}`,file);
     });
+    fd.append('vendor_count',vendorSlots.length);
+
     fd.append('client',document.getElementById('pi-client').value);
     fd.append('project_no',document.getElementById('pi-projno').value);
     fd.append('project_name',document.getElementById('pi-name').value);
     fd.append('location',document.getElementById('pi-loc').value);
     fd.append('equipment',document.getElementById('pi-equip').value);
     fd.append('author',document.getElementById('pi-author').value);
+
     const resp=await fetch('/generate',{method:'POST',body:fd});
     const result=await resp.json();
     clearInterval(ticker);
     document.getElementById('overlay').classList.remove('show');
     document.getElementById('sub-btn').disabled=false;
     document.getElementById('badge').textContent='Ready';
+
     if(result.error){
       document.getElementById('emsg').textContent='Error: '+result.error;
       document.getElementById('ebox').classList.add('show');
-    } else {
+    }else{
       document.getElementById('rmsg').textContent=result.message;
       document.getElementById('dl-link').href='/download/'+result.filename;
       document.getElementById('dl-link').download=result.filename;
@@ -434,7 +485,8 @@ def generate():
     if ds and ds.filename:
         content += f"=== DATA SHEET ({ds.filename}) ===\n{extract_text(ds)}\n\n"
 
-    for i in (1, 2, 3):
+    vendor_count = int(request.form.get("vendor_count", 3))
+    for i in range(1, vendor_count + 1):
         vf = request.files.get(f"vendor_{i}")
         vn = request.form.get(f"vendor_name_{i}", f"Vendor {i}")
         if vf and vf.filename:
@@ -472,7 +524,7 @@ def generate():
     with open(fpath, "wb") as f:
         f.write(xlsx_bytes)
 
-    file_count = len([x for x in [ds] + [request.files.get(f"vendor_{i}") for i in (1,2,3)] if x and x.filename])
+    file_count = len([x for x in [ds] + [request.files.get(f"vendor_{i}") for i in range(1, vendor_count+1)] if x and x.filename])
     msg = f"Filled {file_count} files across {len(row_map)} template fields. Yellow cells = not found in vendor quote."
     return jsonify({"filename": fname, "message": msg})
 
