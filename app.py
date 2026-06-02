@@ -26,37 +26,76 @@ def is_numeric_field(key):
 def build_row_map(ws):
     """
     Build {row_number: field_key} by reading col A labels.
-    Tracks current section to disambiguate duplicate labels
-    (e.g. 'Pump & Motor' appears under both Pricing and Lead Time).
+    Tracks current section to disambiguate duplicate labels.
+    Handles both commercial sections (pricing/lead time) and
+    multi-equipment templates (TLO/MLO/Hydraulic Start etc.)
     """
     row_map = {}
 
-    # Section header labels — exact matches only, not startswith
+    # Section header labels — exact matches only, skip these rows
     SECTION_MARKERS = {
         "technical_commercial_bid_tab", "technical_bid_comparison",
-        "basic_description", "pump_performance", "construction",
-        "special_requirements", "special_requirments", "seal_plans",
+        "basic_description", "construction",
+        "special_requirements", "special_requirments",
         "motor_driver", "inspection_and_testing", "site_data",
-        "other", "adders", "commercial_bid_comparison", "pricing",
+        "other", "adders", "commercial_bid_comparison",
         "commercial_recommendationacceptability",
         "technical_recommendationacceptability",
         "commercial_recommendation_acceptability",
         "technical_recommendation_acceptability",
-        "recommendationacceptability", "lead_time",
-        "payment", "delivery", "misc", "materials",
+        "technical_recommendationacceptability",
+        "recommendationacceptability",
+        # Sub-section headers that appear inside equipment blocks
+        "unit_data", "process_data", "performance_requirements",
+        "design_criteria", "housing_mechanical_design", "scr_control",
+        "bundle_details", "housing_materials", "electrical_data",
+        "environment_data", "special_requirements", "physical_data",
+        "nozzle_schedule",
+        # Commercial section markers
+        "pricing", "lead_time", "lead_time_weeks", "payment", "delivery", "misc", "materials",
     }
 
-    # Section prefix to prepend when disambiguating duplicate labels
+    # Equipment section markers — these name a piece of equipment, prefix subsequent rows
+    # Key = normalized label, Value = short prefix to use
+    EQUIPMENT_SECTIONS = {}  # filled dynamically from col A labels that look like equipment names
+
+    # Commercial section prefixes
     SECTION_PREFIX_MAP = {
-        "pricing":   "price",
-        "lead_time": "leadtime",
-        "payment":   "payment",
-        "delivery":  "delivery",
-        "adders":    "adder",
+        "pricing":      "price",
+        "pricing_":     "price",
+        "lead_time":    "leadtime",
+        "lead_time_":   "leadtime",
+        "payment":      "payment",
+        "delivery":     "delivery",
+        "adders":       "adder",
     }
 
-    current_section = ""
+    current_section = ""       # commercial section context
+    current_equipment = ""     # equipment block context (tlo, mlo, hydraulic_start, etc.)
 
+    # First pass — find equipment section headers (col A labels that are NOT sub-sections
+    # but appear as major dividers, i.e. rows followed by "UNIT DATA")
+    rows_list = list(ws.iter_rows())
+    equipment_header_rows = set()
+    for i, row in enumerate(rows_list):
+        label_cell = row[0] if row else None
+        if not label_cell: continue
+        label = str(label_cell.value or "").strip()
+        if not label: continue
+        key = re.sub(r'[^a-z0-9\s]', '', label.lower()).strip()
+        key = re.sub(r'\s+', '_', key)
+        # Look ahead — if next non-empty row is "UNIT DATA", this is an equipment header
+        for j in range(i+1, min(i+4, len(rows_list))):
+            next_cell = rows_list[j][0] if rows_list[j] else None
+            if next_cell and next_cell.value:
+                next_key = re.sub(r'[^a-z0-9\s]', '', str(next_cell.value).lower()).strip()
+                next_key = re.sub(r'\s+', '_', next_key)
+                if next_key == "unit_data":
+                    equipment_header_rows.add(label_cell.row)
+                    EQUIPMENT_SECTIONS[label_cell.row] = key[:12]  # short prefix
+                break
+
+    # Second pass — build the row map with full context awareness
     for row in ws.iter_rows():
         label_cell = row[0] if row else None
         if not label_cell or isinstance(label_cell, MergedCell):
@@ -71,19 +110,36 @@ def build_row_map(ws):
         key = re.sub(r'^_+|_+$', '', key)
         key = re.sub(r'_+', '_', key)
 
+        # Update equipment context
+        if label_cell.row in equipment_header_rows:
+            current_equipment = EQUIPMENT_SECTIONS[label_cell.row]
+            continue  # don't map equipment header rows
+
+        # Reset equipment context when we hit commercial sections
+        if key in SECTION_PREFIX_MAP or key in {
+            "commercial_bid_comparison", "commercial_recommendationacceptability",
+            "technical_recommendationacceptability", "recommendationacceptability",
+            "commercial_recommendation_acceptability", "technical_recommendation_acceptability",
+        }:
+            current_equipment = ""
+
         # Check if this is a section marker — update context but don't map
         if key in SECTION_MARKERS:
-            # Update current section if it's a known context section
             for sec in SECTION_PREFIX_MAP:
                 if key.startswith(sec) or key == sec:
                     current_section = sec
                     break
             continue
 
-        # Disambiguate duplicate labels using section context
-        if current_section in SECTION_PREFIX_MAP:
+        # Apply equipment prefix for duplicate fields across equipment blocks
+        if current_equipment:
+            prefix = current_equipment
+            if not key.startswith(prefix):
+                key = f"{prefix}_{key}"
+
+        # Apply commercial section prefix (overrides equipment prefix for commercial rows)
+        if current_section in SECTION_PREFIX_MAP and not current_equipment:
             prefix = SECTION_PREFIX_MAP[current_section]
-            # Don't prefix quantity — it's not a price field
             if key != "quantity" and not key.startswith(prefix):
                 key = f"{prefix}_{key}"
 
@@ -223,6 +279,19 @@ def fill_excel(template_bytes, data, pi):
 
     row_map = build_row_map(ws)
 
+    # Safety check — if template has vendor data already filled in,
+    # warn but continue (user may have uploaded a pre-filled template)
+    vendor_filled_count = sum(
+        1 for row in ws.iter_rows(min_row=8, max_row=ws.max_row)
+        for cell in row
+        if cell.column in (3, 4, 5)  # cols C, D, E
+        and cell.value is not None
+        and str(cell.value).strip() not in ("", "-", "By Vendor", "N/A", "Vendor 1", "Vendor 2", "Vendor 3")
+        and not isinstance(cell, MergedCell)
+    )
+    # If template already has lots of vendor data, it's probably not blank
+    # We still proceed but the row_map will be built from whatever is there
+
     def safe_write(addr, val):
         if not val: return
         cell = ws[addr]
@@ -258,15 +327,21 @@ def fill_excel(template_bytes, data, pi):
                 if curr is None or str(curr).strip() in ("","-","By Vendor","N/A","by vendor","n/a"):
                     cell.fill = YELLOW
 
-    # TOTAL formula — find the total row and the two price rows above it
-    for row_num, field in row_map.items():
-        if field == "total":
+    # TOTAL formula — sum only the price rows (above total, above quantity row)
+    # Find price rows, quantity row, and total row precisely
+    price_rows = [r for r, f in row_map.items() if f.startswith("price_") and "total" not in f]
+    qty_rows = [r for r, f in row_map.items() if f == "quantity"]
+    total_rows = [r for r, f in row_map.items() if "price_total" in f or f == "total"]
+
+    for row_num in total_rows:
+        qty_row = qty_rows[0] if qty_rows else None
+        if price_rows and qty_row:
+            min_price = min(price_rows)
+            max_price = max(price_rows)
             for col in ("C","D","E"):
                 cell = ws[f"{col}{row_num}"]
                 if not isinstance(cell, MergedCell):
-                    # Find quantity row (labeled "quantity") for the multiplier
-                    qty_row = next((r for r, f in row_map.items() if f == "quantity"), row_num - 2)
-                    cell.value = f"=SUM({col}{row_num-5}:{col}{row_num-1})*{col}{qty_row}"
+                    cell.value = f"=SUM({col}{min_price}:{col}{max_price})*{col}{qty_row}"
 
     out = io.BytesIO()
     wb.save(out)
@@ -652,6 +727,16 @@ def generate():
     try:
         wb_tmp = load_workbook(io.BytesIO(template_bytes))
         ws_tmp = wb_tmp.active
+        # Warn if template appears to already be filled
+        filled_vendor_cells = sum(
+            1 for row in ws_tmp.iter_rows(min_row=8, max_row=ws_tmp.max_row)
+            for cell in row
+            if cell.column in (3,4,5) and cell.value is not None
+            and str(cell.value).strip() not in ("","Vendor 1","Vendor 2","Vendor 3","-","By Vendor","N/A")
+            and not isinstance(cell, MergedCell)
+        )
+        if filled_vendor_cells > 30:
+            return jsonify({"error": f"Template appears to already be filled ({filled_vendor_cells} vendor cells have data). Please upload a BLANK template — not a previously generated bid tab."})
         row_map = build_row_map(ws_tmp)
         system_prompt = build_system_prompt(row_map)
     except Exception as e:
