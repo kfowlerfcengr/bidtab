@@ -94,9 +94,9 @@ def build_row_map(ws):
 
 def build_system_prompt(row_map):
     field_list = ", ".join(sorted(set(row_map.values())))
-    return f"""You are a technical bid tab assistant for an engineering procurement team.
+    return f"""You are a THOUROUGH technical bid tab assistant for an engineering procurement team.
 
-You receive a DATA SHEET and up to 3 VENDOR QUOTES.
+You have the capacity to receive several DATA SHEETS for ENGINEERING EQUIPMENT and up to SEVERAL VENDOR QUOTES.
 Extract all available data and return ONLY valid JSON — no markdown, no explanation.
 
 Return this exact structure:
@@ -111,8 +111,6 @@ The template has these exact field keys — use these names precisely:
 {field_list}
 
 IMPORTANT field naming rules (fields are prefixed by their section):
-- "price_pump_motor" = the unit price for pump & motor (a number, no $ or commas)
-- "price_vfd" = VFD price (number or null)
 - "quantity" = number of units being purchased (integer)
 - "leadtime_pump_motor" = pump & motor lead time (e.g. "12-14 Weeks")
 - "payment_payment_terms" = payment terms (e.g. "Net 30")
@@ -126,11 +124,11 @@ IMPORTANT field naming rules (fields are prefixed by their section):
 
 Rules:
 - datasheet key = values from the DATA SHEET only
-- vendor1/2/3 = values from each vendor quote only
+- vendor1/2/3/n = values from each vendor quote only
 - price_*, quantity, adder_* fields must be numbers (no $ or commas) or null
-- quantity is per vendor — extract the number of units each vendor is quoting
+- quantity is per vendor — extract the number of units each vendor is quoting (use context clues, if data sheet has quantity 2, vendor is most likely quoting 2)
 - null for any field not found
-- Be thorough — extract every spec, price, note, and commercial term
+- Be thorough — extract every spec, price, note, and commercial term, AND USE CONTEXT CLUES, do not fudge information for the sake of inptting information
 - Return ONLY the JSON object"""
 
 def extract_text(file_storage) -> str:
