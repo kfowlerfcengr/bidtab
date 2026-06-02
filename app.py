@@ -278,7 +278,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">AI Agent</span></div>
+  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">Agent</span></div>
   <div class="badge" id="badge">Ready</div>
 </div>
 <div class="page">
@@ -290,7 +290,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
         <div class="fld"><label>Client</label><input id="pi-client" placeholder="e.g. FTAI"></div>
         <div class="fld"><label>Project No.</label><input id="pi-projno" placeholder="e.g. FTA260107"></div>
         <div class="fld"><label>Project Name</label><input id="pi-name" placeholder="e.g. FTAI CFM56 Package"></div>
-        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile, AL"></div>
+        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile"></div>
         <div class="fld"><label>Equipment / Item</label><input id="pi-equip" placeholder="e.g. Pumps"></div>
         <div class="fld"><label>Author</label><input id="pi-author" placeholder="Your name"></div>
       </div>
@@ -311,7 +311,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   </div>
 
   <div class="card">
-    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills col B (standards column)</p></div></div>
+    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills F&C standards column</p></div></div>
     <div class="cb">
       <div class="uz" id="z-ds" onclick="document.getElementById('f-ds').click()"
            ondragover="zo(event,'z-ds')" ondragleave="zl('z-ds')" ondrop="zd(event,'z-ds','f-ds')">
