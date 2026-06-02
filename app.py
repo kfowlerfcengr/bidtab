@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify, send_file, render_template_string
 import anthropic
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+from openpyxl.cell.cell import MergedCell
 
 try:
     import pdfplumber
@@ -17,48 +18,30 @@ OUTPUT_DIR = tempfile.mkdtemp(prefix="bidtab_")
 
 YELLOW = PatternFill("solid", fgColor="FFFF00")
 
-# These field keys will always be treated as numbers when found
-NUMERIC_KEYWORDS = [
-    "price", "cost", "qty", "quantity", "total", "amount",
-    "adder", "witnessed", "test_cert", "fee"
-]
+NUMERIC_KEYWORDS = ["price","cost","qty","quantity","total","amount","adder","witnessed","test_cert","fee"]
 
 def is_numeric_field(key):
     return any(kw in key for kw in NUMERIC_KEYWORDS)
 
 def build_row_map(ws):
-    """
-    Dynamically build {row_number: field_key} by reading column A labels
-    from the template. Works for ANY bid tab template regardless of equipment type.
-    Also detects which rows are vendor data rows (have editable cells in cols C/D/E).
-    Returns: (row_map, vendor_col_start)
-    """
-    from openpyxl.cell.cell import MergedCell
     row_map = {}
-
     for row in ws.iter_rows():
-        # Get label from col A
         label_cell = row[0] if row else None
         if not label_cell or isinstance(label_cell, MergedCell):
             continue
         label = str(label_cell.value or "").strip()
         if not label or label.lower() in ("none", ""):
             continue
-
-        # Convert label to a clean field key
         key = label.lower()
-        key = re.sub(r'[^a-z0-9\s]', '', key)   # remove special chars
-        key = re.sub(r'\s+', '_', key.strip())   # spaces to underscores
-        key = re.sub(r'^_+|_+$', '', key)        # trim underscores
-        key = re.sub(r'_+', '_', key)            # collapse doubles
-
+        key = re.sub(r'[^a-z0-9\s]', '', key)
+        key = re.sub(r'\s+', '_', key.strip())
+        key = re.sub(r'^_+|_+$', '', key)
+        key = re.sub(r'_+', '_', key)
         if key:
             row_map[label_cell.row] = key
-
     return row_map
 
 def build_system_prompt(row_map):
-    """Build a Claude system prompt from the actual template field keys."""
     field_list = ", ".join(sorted(set(row_map.values())))
     return f"""You are a technical bid tab assistant for an engineering procurement team.
 
@@ -84,7 +67,6 @@ Rules:
 - Be thorough — extract every spec, price, note, and commercial term you can find
 - Return ONLY the JSON object"""
 
-
 def extract_text(file_storage) -> str:
     name = (file_storage.filename or "").lower()
     data = file_storage.read()
@@ -105,7 +87,6 @@ def extract_text(file_storage) -> str:
         return "\n".join(lines)
     return data.decode("utf-8", errors="replace")
 
-
 def coerce(val, field):
     if val is None: return None
     s = str(val).strip()
@@ -117,83 +98,63 @@ def coerce(val, field):
         except: return s
     return s
 
+def resolve_cell(ws, addr):
+    """Return the writable master cell for addr, resolving merged ranges."""
+    cell = ws[addr]
+    if not isinstance(cell, MergedCell):
+        return cell
+    for merge_range in ws.merged_cells.ranges:
+        if addr in merge_range:
+            return ws.cell(merge_range.min_row, merge_range.min_col)
+    return cell
 
 def fill_excel(template_bytes, data, pi):
-    from openpyxl.cell.cell import MergedCell
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb.active
 
     # Dynamically build row map from this template's column A labels
     row_map = build_row_map(ws)
 
-    # Detect vendor columns — find row 7 (or first row with 3+ filled cells after col B)
-    # Default: B=datasheet, C=vendor1, D=vendor2, E=vendor3
-    col_map = {"datasheet":"B", "vendor1":"C", "vendor2":"D", "vendor3":"E"}
+    def safe_write(addr, val):
+        if not val: return
+        cell = ws[addr]
+        if not isinstance(cell, MergedCell):
+            cell.value = val
 
-    # Detect header rows by looking for Client/Project labels
-    # Try to write project info into common header positions
-    header_written = False
-    for row in ws.iter_rows(min_row=1, max_row=15):
-        for cell in row:
-            if isinstance(cell, MergedCell): continue
-            lbl = str(cell.value or "").strip().lower()
-            # Find vendor name row (row with "vendor 1" or similar in C/D/E)
-            if lbl in ("client:", "client"):
-                # Write project info relative to this position
-                r = cell.row
-                for addr, val in {
-                    f"C{r}": pi.get("client",""),
-                    f"C{r+1}": pi.get("project_no",""),
-                    f"C{r+2}": pi.get("project_name",""),
-                    f"E{r+2}": datetime.today().strftime("%m/%d/%Y"),
-                    f"C{r+3}": pi.get("location",""),
-                    f"F{r+3}": pi.get("author",""),
-                }.items():
-                    c = ws[addr]
-                    if val and not isinstance(c, MergedCell): c.value = val
-                header_written = True
-                break
-        if header_written: break
+    # ── Project header (hardcoded — same position in all F&C templates) ───
+    safe_write("C2", pi.get("client",""))
+    safe_write("C3", pi.get("project_no",""))
+    safe_write("C4", pi.get("project_name",""))
+    safe_write("E4", datetime.today().strftime("%m/%d/%Y"))
+    safe_write("C5", pi.get("location",""))
+    safe_write("F5", pi.get("author",""))
+    safe_write("B7", pi.get("equipment",""))
+    safe_write("C7", pi.get("vendor1_name","Vendor 1"))
+    safe_write("D7", pi.get("vendor2_name","Vendor 2"))
+    safe_write("E7", pi.get("vendor3_name","Vendor 3"))
 
-    # Find the vendor header row (where vendor names go)
-    for row in ws.iter_rows(min_row=1, max_row=20):
-        for cell in row:
-            if isinstance(cell, MergedCell): continue
-            lbl = str(cell.value or "").strip().lower()
-            if lbl in ("equipment/item:", "equipment/item", "equipment:", "item:"):
-                r = cell.row
-                # Write equipment and vendor names in cols C, D, E of this row
-                for col_letter, key in [("B", "equipment"), ("C","vendor1_name"), ("D","vendor2_name"), ("E","vendor3_name")]:
-                    c = ws[f"{col_letter}{r}"]
-                    val = pi.get(key,"")
-                    if val and not isinstance(c, MergedCell): c.value = val
-                break
-
-    # Fill data rows using the dynamic row map
-    filled = 0
+    # ── Data rows (dynamic — works for any template) ───────────────────────
+    col_map = {"datasheet":"B","vendor1":"C","vendor2":"D","vendor3":"E"}
     for row_num, field in row_map.items():
         for src, col in col_map.items():
             val = coerce((data.get(src) or {}).get(field), field)
-            cell = ws[f"{col}{row_num}"]
-            if isinstance(cell, MergedCell):
-                continue
+            addr = f"{col}{row_num}"
+            cell = resolve_cell(ws, addr)
+            if isinstance(cell, MergedCell): continue
             if val is not None:
                 cell.value = val
-                filled += 1
             elif col in ("C","D","E"):
                 curr = cell.value
                 if curr is None or str(curr).strip() in ("","-","By Vendor","N/A","by vendor","n/a"):
                     cell.fill = YELLOW
 
-    # Try to find and restore TOTAL formula rows
-    # Look for a row labeled "TOTAL" and write SUM formulas in vendor cols
+    # ── Restore TOTAL formula for any row labeled "total" ─────────────────
     for row_num, field in row_map.items():
-        if "total" in field:
+        if field == "total":
             for col in ("C","D","E"):
-                cell = ws[f"{col}{row_num}"]
-                if not isinstance(cell, MergedCell):
-                    # Find price rows above to sum
-                    cell.value = f"=SUM({col}{row_num-10}:{col}{row_num-1})"
+                c = resolve_cell(ws, f"{col}{row_num}")
+                if not isinstance(c, MergedCell):
+                    c.value = f"=SUM({col}{row_num-10}:{col}{row_num-1})"
 
     out = io.BytesIO()
     wb.save(out)
@@ -278,11 +239,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">Agent</span></div>
+  <div class="brand">BID<em>/</em>TAB <span style="opacity:.4;font-size:11px;font-weight:300;">AI Agent</span></div>
   <div class="badge" id="badge">Ready</div>
 </div>
 <div class="page">
-
   <div class="card">
     <div class="ch"><div class="ch-ico">📁</div><div><h2>Project Info</h2><p>Fills the header of your bid tab</p></div></div>
     <div class="cb">
@@ -290,15 +250,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
         <div class="fld"><label>Client</label><input id="pi-client" placeholder="e.g. FTAI"></div>
         <div class="fld"><label>Project No.</label><input id="pi-projno" placeholder="e.g. FTA260107"></div>
         <div class="fld"><label>Project Name</label><input id="pi-name" placeholder="e.g. FTAI CFM56 Package"></div>
-        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile"></div>
+        <div class="fld"><label>Project Location</label><input id="pi-loc" placeholder="e.g. Mobile, AL"></div>
         <div class="fld"><label>Equipment / Item</label><input id="pi-equip" placeholder="e.g. Pumps"></div>
         <div class="fld"><label>Author</label><input id="pi-author" placeholder="Your name"></div>
       </div>
     </div>
   </div>
-
   <div class="card">
-    <div class="ch"><div class="ch-ico">1</div><div><h2>Bid Tab Template</h2><p>Your blank .xlsx — formatting, colors and merges will be preserved exactly</p></div></div>
+    <div class="ch"><div class="ch-ico">1</div><div><h2>Bid Tab Template</h2><p>Your blank .xlsx — formatting, colors and merges preserved exactly</p></div></div>
     <div class="cb">
       <div class="uz" id="z-tmpl" onclick="document.getElementById('f-tmpl').click()"
            ondragover="zo(event,'z-tmpl')" ondragleave="zl('z-tmpl')" ondrop="zd(event,'z-tmpl','f-tmpl')">
@@ -309,9 +268,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
       </div>
     </div>
   </div>
-
   <div class="card">
-    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills F&C standards column</p></div></div>
+    <div class="ch"><div class="ch-ico">2</div><div><h2>Data Sheet</h2><p>Engineering spec — fills col B (standards column)</p></div></div>
     <div class="cb">
       <div class="uz" id="z-ds" onclick="document.getElementById('f-ds').click()"
            ondragover="zo(event,'z-ds')" ondragleave="zl('z-ds')" ondrop="zd(event,'z-ds','f-ds')">
@@ -321,7 +279,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
       </div>
     </div>
   </div>
-
   <div class="card">
     <div class="ch"><div class="ch-ico">3</div><div><h2>Vendor Quotes</h2><p>Any format, any layout — AI figures it out</p></div></div>
     <div class="cb">
@@ -353,12 +310,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
       </div>
     </div>
   </div>
-
   <div class="sub-area">
     <button class="sub-btn" id="sub-btn" onclick="run()">Generate Bid Tab</button>
     <div class="sub-note">Server reads your files with AI → returns a perfectly formatted .xlsx</div>
   </div>
-
   <div class="rbox" id="rbox">
     <h3>✓ Bid tab ready</h3>
     <p id="rmsg"></p>
@@ -366,40 +321,34 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   </div>
   <div class="ebox" id="ebox"><p id="emsg"></p></div>
 </div>
-
 <div class="overlay" id="overlay">
   <div class="pbox">
     <div class="spin"></div>
-    <h3>Working on it…</h3>
+    <h3>AI is working…</h3>
     <p id="pmsg">Reading your files</p>
     <div class="pstep" id="pstep"></div>
   </div>
 </div>
-
 <script>
 function zo(e,id){e.preventDefault();document.getElementById(id).classList.add('drag');}
 function zl(id){document.getElementById(id).classList.remove('drag');}
 function zd(e,zid,fid){e.preventDefault();zl(zid);const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById(fid);const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;chip(inp,fid==='f-ds'?'chip-ds':fid==='f-tmpl'?'chip-tmpl':null);}
 function chip(inp,chipId){const f=inp.files[0];if(!f||!chipId)return;document.getElementById(chipId).innerHTML=`<div class="fchip">✓ ${f.name}</div>`;}
 function vfile(inp,idx){const f=inp.files[0];if(!f)return;document.getElementById('vfn'+idx).textContent='✓ '+f.name;document.getElementById('vc'+idx).classList.add('loaded');document.getElementById('vh'+idx).classList.add('loaded');}
-
 async function run(){
   const tmplFile=document.getElementById('f-tmpl').files[0];
   if(!tmplFile){alert('Please upload your bid tab template (.xlsx).');return;}
   const dsFile=document.getElementById('f-ds').files[0];
   const vFiles=[0,1,2].map(i=>document.getElementById('vf'+i).files[0]||null);
   if(!dsFile&&!vFiles.some(Boolean)){alert('Please upload at least a data sheet or one vendor quote.');return;}
-
   document.getElementById('sub-btn').disabled=true;
   document.getElementById('rbox').classList.remove('show');
   document.getElementById('ebox').classList.remove('show');
   document.getElementById('overlay').classList.add('show');
   document.getElementById('badge').textContent='Processing…';
-
   const msgs=['Reading files…','AI extracting specs…','Mapping vendor data…','Writing Excel…'];
   let mi=0;
   const ticker=setInterval(()=>{document.getElementById('pmsg').textContent=msgs[Math.min(mi,msgs.length-1)];document.getElementById('pstep').textContent=`Step ${Math.min(mi+1,4)} of 4`;mi++;},5000);
-
   try{
     const fd=new FormData();
     fd.append('template',tmplFile);
@@ -414,14 +363,12 @@ async function run(){
     fd.append('location',document.getElementById('pi-loc').value);
     fd.append('equipment',document.getElementById('pi-equip').value);
     fd.append('author',document.getElementById('pi-author').value);
-
     const resp=await fetch('/generate',{method:'POST',body:fd});
     const result=await resp.json();
     clearInterval(ticker);
     document.getElementById('overlay').classList.remove('show');
     document.getElementById('sub-btn').disabled=false;
     document.getElementById('badge').textContent='Ready';
-
     if(result.error){
       document.getElementById('emsg').textContent='Error: '+result.error;
       document.getElementById('ebox').classList.add('show');
@@ -474,7 +421,6 @@ def generate():
         "vendor3_name": request.form.get("vendor_name_3", "Vendor 3"),
     }
 
-    # Read template to build dynamic row map and system prompt
     try:
         wb_tmp = load_workbook(io.BytesIO(template_bytes))
         ws_tmp = wb_tmp.active
@@ -483,7 +429,6 @@ def generate():
     except Exception as e:
         return jsonify({"error": f"Could not read template: {e}"})
 
-    # Build content for Claude
     content = ""
     ds = request.files.get("datasheet")
     if ds and ds.filename:
@@ -498,7 +443,6 @@ def generate():
     if not content.strip():
         return jsonify({"error": "No data sheet or vendor quotes uploaded."})
 
-    # Call Claude with template-specific prompt
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
@@ -516,13 +460,11 @@ def generate():
     except Exception as e:
         return jsonify({"error": f"AI error: {e}"})
 
-    # Fill Excel using the dynamic row map
     try:
         xlsx_bytes, _ = fill_excel(template_bytes, data, pi)
     except Exception as e:
         return jsonify({"error": f"Excel error: {e}"})
 
-    # Save output
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     proj = (pi.get("project_no") or "BidTab").replace(" ", "_")
     fname = f"Bid_Tab_{proj}_{stamp}.xlsx"
@@ -546,5 +488,5 @@ def download(fname):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"\n  Bid Tab Agent → http://localhost:{port}\n")
+    print(f"\n  Bid Tab Agent -> http://localhost:{port}\n")
     app.run(host="0.0.0.0", port=port, debug=False)
