@@ -211,12 +211,17 @@ General rules for field naming:
 Extraction rules:
 - "datasheet" key = combined values from ALL DATA SHEETS only
 - "vendor1/2/3/n" = values from each vendor quote only — never mix sources
-- All price/adder/quantity fields must be plain numbers (no $, commas, or units) or null
-- For price fields: use the EXACT unit price from the quote line item — do NOT add prices together or calculate totals
-- For lead times: if a vendor gives one lead time for all items, repeat it for each item field. If not stated at all, use null
-- Use context clues for quantity if a vendor doesn't explicitly state it
-- For dimension fields (length, weight, diameter etc.): preserve decimal precision exactly — never round 26.5 to 26
-- null for any field not found — do NOT fabricate or guess information
+- price_* and adder_* fields: plain numbers only (no $, commas, or units)
+- quantity field: integer only
+- ALL OTHER fields: preserve units exactly as they appear in the source (e.g. "3 kW", "43 lbs", "26.5 in", "122°F (50°C)", "35 business days")
+- For dimension fields: preserve full decimal precision — never round (26.5 stays 26.5, not 26)
+- For temperature fields: include both °F and °C if the source has both (e.g. "122°F (50°C)")
+- For electrical capacity: include unit (e.g. "3 kW" not just "3")
+- For weight fields: include unit (e.g. "43 lbs" not just "43")
+- For price fields: use the EXACT unit price per line item — do NOT sum multiple items
+- For lead times: if a vendor gives one lead time for all items, repeat it for each item field
+- quotation_number = the vendor's quote/reference number, NOT their internal project reference code
+- null for any field not found — do NOT fabricate or guess
 - Extract every spec, technical parameter, price, commercial term, and note you can find
 - Return ONLY the JSON object, nothing else"""
 
@@ -273,10 +278,14 @@ def coerce(val, field):
     s = str(val).strip()
     if not s or s.lower() == "null": return None
     if is_numeric_field(field):
+        # For price/adder/quantity fields: strip units, return plain number
         try:
             f = float(s.replace(",","").replace("$","").replace(" ",""))
             return int(f) if f == int(f) else f
-        except: return s
+        except:
+            # If it can't be parsed as a number, return as-is (e.g. "TBD")
+            return s
+    # For all other fields: return the value as-is, preserving units
     return s
 
 def fill_excel(template_bytes, data, pi):
