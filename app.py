@@ -307,7 +307,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <div class="topbar">
   <div class="brand">
     <img src="/static/logo.png?v=3" alt="F&C Engineers">
-    <span class="brand-name">Bid Tab Agent<span>AI</span></span>
+    <span class="brand-name">Bid Tab Agent</span>
   </div>
   <div class="badge" id="badge">Ready</div>
 </div>
