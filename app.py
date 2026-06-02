@@ -177,6 +177,21 @@ def build_system_prompt(row_map):
 
     field_hints_str = "\n".join(field_hints) if field_hints else ""
 
+    # Detect if this is a multi-equipment template
+    equip_prefixes = sorted(set(
+        f.split('_')[0] + '_' + f.split('_')[1] if len(f.split('_')) > 1 else f.split('_')[0]
+        for f in row_map.values()
+        if '_' in f and not any(f.startswith(p) for p in ('price_','leadtime_','payment_','delivery_','adder_'))
+    ))
+    multi_equip_note = ""
+    if len(equip_prefixes) > 1:
+        multi_equip_note = f"""
+IMPORTANT — this template covers MULTIPLE equipment types with separate sections.
+Each equipment section has its own prefixed fields (e.g. {', '.join(equip_prefixes[:4])}).
+Map each vendor's data for each piece of equipment to the CORRECT prefixed field.
+Do NOT put data from one equipment type into another equipment type's fields.
+Each vendor may quote different equipment — if a vendor did not quote a specific item, use null for that item's fields."""
+
     return f"""You are a THOROUGH technical bid tab assistant for an engineering procurement team.
 
 You may receive ONE OR MORE DATA SHEETS for engineering equipment, and up to SEVERAL VENDOR QUOTES.
@@ -199,6 +214,7 @@ The template has these exact field keys — map ALL extracted data to these key 
 
 How the field keys are structured (all come from this specific template):
 {field_hints_str}
+{multi_equip_note}
 
 General rules for field naming:
 - Fields prefixed with "price_" are equipment/component prices → numbers only (no $ or commas)
@@ -691,7 +707,8 @@ async function run(){
       document.getElementById('emsg').textContent='Error: '+result.error;
       document.getElementById('ebox').classList.add('show');
     }else{
-      document.getElementById('rmsg').textContent=result.message;
+      const versionLabel = result.version ? ` — Version ${result.version}` : '';
+      document.getElementById('rmsg').textContent=result.message+versionLabel;
       document.getElementById('dl-link').href='/download/'+result.filename;
       document.getElementById('dl-link').download=result.filename;
       document.getElementById('rbox').classList.add('show');
@@ -801,16 +818,23 @@ def generate():
     except Exception as e:
         return jsonify({"error": f"Excel error: {e}"})
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    proj = (pi.get("project_no") or "BidTab").replace(" ", "_")
-    fname = f"Bid_Tab_{proj}_{stamp}.xlsx"
+    # Generate versioned filename: BidTabAgent_EQUIPMENT_v1.xlsx, v2.xlsx etc.
+    equip = (pi.get("equipment") or "BidTab").strip()
+    equip_slug = re.sub(r'[^a-zA-Z0-9]', '_', equip)   # spaces/special → underscore
+    equip_slug = re.sub(r'_+', '_', equip_slug).strip('_')  # collapse and trim
+
+    # Find next version number by scanning existing files for this equipment
+    existing = [f for f in os.listdir(OUTPUT_DIR)
+                if f.startswith(f"BidTabAgent_{equip_slug}_v") and f.endswith(".xlsx")]
+    version = len(existing) + 1
+    fname = f"BidTabAgent_{equip_slug}_v{version}.xlsx"
     fpath = os.path.join(OUTPUT_DIR, fname)
     with open(fpath, "wb") as f:
         f.write(xlsx_bytes)
 
     file_count = len([x for x in [ds] + [request.files.get(f"vendor_{i}") for i in range(1, vendor_count+1)] if x and x.filename])
     msg = f"Filled {file_count} files across {len(row_map)} template fields. Yellow cells = not found in vendor quote."
-    return jsonify({"filename": fname, "message": msg})
+    return jsonify({"filename": fname, "message": msg, "version": version})
 
 
 @app.route("/download/<fname>")
