@@ -428,7 +428,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 <body>
 <div class="topbar">
   <div class="brand">
-    <img src="/static/logo.png?v=2" alt="Logo">
     <span class="brand-name">Bid Tab Agent<span>AI</span></span>
   </div>
   <div class="badge" id="badge">Ready</div>
