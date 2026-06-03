@@ -231,11 +231,16 @@ Extraction rules:
 - quantity field: integer only
 - ALL OTHER fields: preserve units exactly as they appear in the source (e.g. "3 kW", "43 lbs", "26.5 in", "122°F (50°C)", "35 business days")
 - For dimension fields: preserve full decimal precision — never round (26.5 stays 26.5, not 26)
-- For temperature fields: include both °F and °C if the source has both (e.g. "122°F (50°C)")
+- For temperature fields: include both °F and °C if the source has both
 - For electrical capacity: include unit (e.g. "3 kW" not just "3")
 - For weight fields: include unit (e.g. "43 lbs" not just "43")
-- For price fields: use the EXACT unit price per line item — do NOT sum multiple items
-- For lead times: if a vendor gives one lead time for all items, repeat it for each item field
+- For voltage/phase/frequency: extract exactly as stated (e.g. "480V/3PH/60HZ", "400V/3PH")
+- For hazardous area class: extract exactly (e.g. "CLASS I DIV 1 GR. B,C,D" or "ATEX ZONE 2, GROUP IIA,B")
+- For price fields: if a vendor quotes BOTH a heater unit AND a control panel/PCA as separate line items for the SAME piece of equipment, ADD them together — the price field should reflect the full equipment cost including its panel
+- For lead times: use the PRODUCT DELIVERY lead time (not drawing submittal). If one lead time covers all items, repeat it for each item field
+- For "total_length_dimension" fields: use the full immersion/bundle length (the long dimension, e.g. 48.0625 in)
+- For "flange_face_to_bundle_end_dim" fields: use the shorter cold section / unheated length (e.g. 3.875 in, 4.0 in)
+- For design pressure/temperature: extract from vendor quotes when stated (e.g. "15 PSI", "78°C")
 - quotation_number = the vendor's quote/reference number, NOT their internal project reference code
 - null for any field not found — do NOT fabricate or guess
 - Extract every spec, technical parameter, price, commercial term, and note you can find
@@ -452,6 +457,28 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 .ebox{background:var(--rbg);border:1px solid #f5c2c2;border-radius:10px;padding:14px 18px;margin-top:18px;display:none;}
 .ebox.show{display:block;}
 .ebox p{color:var(--red);font-size:13px;}
+.fbox{background:#fff;border:1px solid var(--line);border-radius:12px;margin-top:18px;display:none;overflow:hidden;}
+.fbox.show{display:block;}
+.fbox-head{background:var(--bg);padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px;}
+.fbox-head span:first-child{font-weight:600;font-size:14px;}
+.fbox-sub{font-size:11px;color:var(--ink3);}
+.fbox-body{padding:18px 22px;}
+.rating-row{display:flex;gap:10px;margin-bottom:16px;}
+.rating-btn{flex:1;padding:10px 8px;border:2px solid var(--line2);border-radius:8px;background:var(--bg);font-size:13px;cursor:pointer;font-family:var(--sans);transition:all .15s;font-weight:500;}
+.rating-btn:hover{border-color:var(--ink3);background:#f0f0f0;}
+.rating-btn.active-bad{border-color:#e53e3e;background:#fff5f5;color:#c53030;}
+.rating-btn.active-track{border-color:#d69e2e;background:#fffff0;color:#b7791f;}
+.rating-btn.active-good{border-color:#38a169;background:#f0fff4;color:#276749;}
+.fbox-fields{display:flex;flex-direction:column;gap:12px;margin-bottom:16px;}
+.fbox-fields .fld label{display:block;font-size:10px;font-family:var(--mono);color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.fbox-fields textarea{width:100%;border:1px solid var(--line2);border-radius:7px;padding:8px 11px;font-family:var(--sans);font-size:13px;color:var(--ink);outline:none;resize:vertical;}
+.fbox-fields textarea:focus{border-color:var(--accent);}
+.fbox-actions{display:flex;align-items:center;gap:12px;}
+.fb-submit{background:var(--accent);color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:500;font-family:var(--sans);cursor:pointer;transition:opacity .15s;}
+.fb-submit:hover{opacity:.88;}
+.fb-submit:disabled{background:#aaa;cursor:not-allowed;opacity:1;}
+.fb-skip{background:none;border:none;color:var(--ink3);font-size:13px;cursor:pointer;font-family:var(--sans);text-decoration:underline;}
+.fb-thanks{display:none;color:var(--green);font-size:13px;font-weight:500;margin-top:10px;}
 .overlay{position:fixed;inset:0;background:rgba(15,17,23,.72);display:none;align-items:center;justify-content:center;z-index:200;}
 .overlay.show{display:flex;}
 .pbox{background:#fff;border-radius:14px;padding:38px 46px;text-align:center;max-width:360px;width:90%;}
@@ -523,9 +550,39 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
   <div class="rbox" id="rbox">
     <h3>✓ Bid tab ready</h3>
     <p id="rmsg"></p>
-    <a class="dl-btn" id="dl-link" href="#">⬇ Download Filled Bid Tab (.xlsx)</a>
+    <a class="dl-btn" id="dl-link" href="#" onclick="showFeedback()">⬇ Download Filled Bid Tab (.xlsx)</a>
   </div>
   <div class="ebox" id="ebox"><p id="emsg"></p></div>
+
+  <!-- Feedback panel — appears after download -->
+  <div class="fbox" id="fbox">
+    <div class="fbox-head">
+      <span>📋 How did it do?</span>
+      <span class="fbox-sub">Your feedback teaches the agent to improve on this template</span>
+    </div>
+    <div class="fbox-body">
+      <div class="rating-row">
+        <button class="rating-btn" id="rb-bad"    onclick="setRating('bad')">🔴 Bad</button>
+        <button class="rating-btn" id="rb-track"  onclick="setRating('track')">🟡 On the right track</button>
+        <button class="rating-btn" id="rb-good"   onclick="setRating('good')">🟢 Good</button>
+      </div>
+      <div class="fbox-fields" id="fbox-fields">
+        <div class="fld">
+          <label>What was wrong / what was good?</label>
+          <textarea id="fb-comment" placeholder="e.g. MLO weight was 43 lbs but should be 77 lbs. Lead times were correct." rows="3"></textarea>
+        </div>
+        <div class="fld">
+          <label>Specific cell corrections (optional)</label>
+          <textarea id="fb-cells" placeholder="e.g. C173 = 77 lbs&#10;C278 = 11515&#10;D152 = 8 kW" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="fbox-actions">
+        <button class="fb-submit" id="fb-submit" onclick="submitFeedback()" disabled>Submit Feedback</button>
+        <button class="fb-skip" onclick="skipFeedback()">Skip</button>
+      </div>
+      <div class="fb-thanks" id="fb-thanks">✓ Feedback saved — the agent will use this next time.</div>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="overlay">
@@ -538,6 +595,35 @@ body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14p
 </div>
 
 <script>
+/* ── Feedback system ── */
+let currentRating=null,currentFilename=null,currentEquipment=null;
+
+function showFeedback(){
+  const href=document.getElementById('dl-link').getAttribute('data-href');
+  if(href){const a=document.createElement('a');a.href=href;a.download=document.getElementById('dl-link').getAttribute('data-download');a.click();}
+  setTimeout(()=>{const fb=document.getElementById('fbox');fb.classList.add('show');fb.scrollIntoView({behavior:'smooth',block:'nearest'});},400);
+  return false;
+}
+function setRating(r){
+  currentRating=r;
+  ['bad','track','good'].forEach(x=>document.getElementById('rb-'+x).className='rating-btn'+(r===x?' active-'+x:''));
+  document.getElementById('fb-submit').disabled=false;
+}
+async function submitFeedback(){
+  if(!currentRating)return;
+  const comment=document.getElementById('fb-comment').value.trim();
+  const cells=document.getElementById('fb-cells').value.trim();
+  document.getElementById('fb-submit').disabled=true;
+  try{
+    await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rating:currentRating,comment,cell_corrections:cells,filename:currentFilename,equipment:currentEquipment,timestamp:new Date().toISOString()})});
+    document.getElementById('fb-thanks').style.display='block';
+    document.getElementById('fbox-fields').style.display='none';
+    document.getElementById('fbox-actions').style.display='none';
+  }catch(e){document.getElementById('fb-submit').disabled=false;alert('Could not save feedback: '+e.message);}
+}
+function skipFeedback(){document.getElementById('fbox').classList.remove('show');}
+
 function zo(e,id){e.preventDefault();document.getElementById(id).classList.add('drag');}
 function zl(id){document.getElementById(id).classList.remove('drag');}
 function zd(e,zid,fid){e.preventDefault();zl(zid);const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById(fid);const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;chip(inp,fid==='f-ds'?'chip-ds':fid==='f-tmpl'?'chip-tmpl':null);}
@@ -709,9 +795,26 @@ async function run(){
     }else{
       const versionLabel = result.version ? ` — Version ${result.version}` : '';
       document.getElementById('rmsg').textContent=result.message+versionLabel;
-      document.getElementById('dl-link').href='/download/'+result.filename;
-      document.getElementById('dl-link').download=result.filename;
+      // Store for feedback
+      currentFilename=result.filename;
+      currentEquipment=document.getElementById('pi-equip').value||'Unknown';
+      // Wire download link
+      const dlLink=document.getElementById('dl-link');
+      dlLink.setAttribute('data-href','/download/'+result.filename);
+      dlLink.setAttribute('data-download',result.filename);
+      dlLink.href='#';
+      dlLink.onclick=showFeedback;
       document.getElementById('rbox').classList.add('show');
+      // Reset feedback panel state
+      currentRating=null;
+      ['bad','track','good'].forEach(x=>document.getElementById('rb-'+x).className='rating-btn');
+      document.getElementById('fb-submit').disabled=true;
+      document.getElementById('fb-comment').value='';
+      document.getElementById('fb-cells').value='';
+      document.getElementById('fb-thanks').style.display='none';
+      document.getElementById('fbox-fields').style.display='';
+      document.getElementById('fbox-actions').style.display='';
+      document.getElementById('fbox').classList.remove('show');
     }
   }catch(err){
     clearInterval(ticker);
@@ -727,8 +830,79 @@ async function run(){
 </html>"""
 
 
-@app.route("/")
-def index():
+FEEDBACK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feedback_store")
+os.makedirs(FEEDBACK_DIR, exist_ok=True)
+
+def load_feedback_for_template(equipment: str) -> str:
+    """Load all past feedback for this equipment type and format it for Claude."""
+    slug = re.sub(r'[^a-z0-9]', '_', equipment.lower()).strip('_')
+    fpath = os.path.join(FEEDBACK_DIR, f"{slug}.json")
+    if not os.path.exists(fpath):
+        return ""
+    try:
+        with open(fpath) as f:
+            entries = json.load(f)
+    except Exception:
+        return ""
+    if not entries:
+        return ""
+
+    # Build prompt injection from feedback history
+    lines = [f"\nPAST FEEDBACK ON THIS TEMPLATE ({equipment}) — {len(entries)} sessions:"]
+    # Weight recent feedback more — show last 10, summarise older
+    recent = entries[-10:]
+    for e in recent:
+        rating_label = {"bad": "❌ BAD", "track": "⚠️ ON THE RIGHT TRACK", "good": "✅ GOOD"}.get(e.get("rating",""), "?")
+        lines.append(f"\n  [{rating_label}] {e.get('timestamp','')[:10]}")
+        if e.get("comment"):
+            lines.append(f"    Feedback: {e['comment']}")
+        if e.get("cell_corrections"):
+            lines.append(f"    Cell corrections: {e['cell_corrections']}")
+
+    # Extract all cell corrections as hard rules
+    all_corrections = []
+    for e in entries:
+        if e.get("cell_corrections"):
+            all_corrections.append(e["cell_corrections"])
+    if all_corrections:
+        lines.append(f"\n  KNOWN CORRECTIONS (apply these every time):")
+        for c in all_corrections[-5:]:  # last 5 correction sets
+            for line in c.strip().split('\n'):
+                if '=' in line or ':' in line:
+                    lines.append(f"    - {line.strip()}")
+
+    return "\n".join(lines)
+
+
+@app.route("/feedback", methods=["POST"])
+def save_feedback():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    equipment = data.get("equipment", "unknown")
+    slug = re.sub(r'[^a-z0-9]', '_', equipment.lower()).strip('_')
+    fpath = os.path.join(FEEDBACK_DIR, f"{slug}.json")
+    try:
+        entries = []
+        if os.path.exists(fpath):
+            with open(fpath) as f:
+                entries = json.load(f)
+        entries.append(data)
+        with open(fpath, "w") as f:
+            json.dump(entries, f, indent=2)
+        return jsonify({"ok": True, "total_feedback": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/feedback_history/<equipment>")
+def feedback_history(equipment):
+    slug = re.sub(r'[^a-z0-9]', '_', equipment.lower()).strip('_')
+    fpath = os.path.join(FEEDBACK_DIR, f"{slug}.json")
+    if not os.path.exists(fpath):
+        return jsonify([])
+    with open(fpath) as f:
+        return jsonify(json.load(f))
     return render_template_string(HTML)
 
 
@@ -770,7 +944,12 @@ def generate():
         if filled_vendor_cells > 30:
             return jsonify({"error": f"Template appears to already be filled ({filled_vendor_cells} vendor cells have data). Please upload a BLANK template — not a previously generated bid tab."})
         row_map = build_row_map(ws_tmp)
+        # Load past feedback and inject into system prompt
+        equipment_name = request.form.get("equipment", "")
+        past_feedback = load_feedback_for_template(equipment_name)
         system_prompt = build_system_prompt(row_map)
+        if past_feedback:
+            system_prompt = system_prompt + "\n" + past_feedback
     except Exception as e:
         return jsonify({"error": f"Could not read template: {e}"})
 
