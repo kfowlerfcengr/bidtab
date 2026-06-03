@@ -830,7 +830,7 @@ async function run(){
 </html>"""
 
 
-FEEDBACK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feedback_store")
+FEEDBACK_DIR = os.path.join(tempfile.gettempdir(), "bidtab_feedback")
 os.makedirs(FEEDBACK_DIR, exist_ok=True)
 
 def load_feedback_for_template(equipment: str) -> str:
@@ -872,6 +872,11 @@ def load_feedback_for_template(equipment: str) -> str:
                     lines.append(f"    - {line.strip()}")
 
     return "\n".join(lines)
+
+
+@app.route("/")
+def index():
+    return render_template_string(HTML)
 
 
 @app.route("/feedback", methods=["POST"])
@@ -1028,10 +1033,6 @@ def download(fname):
 @app.errorhandler(500)
 def internal_error(e):
     return jsonify({"error": f"Server error: {str(e)}"}), 500
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Not found"}), 404
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
