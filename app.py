@@ -234,13 +234,14 @@ Extraction rules:
 - For temperature fields: include both °F and °C if the source has both
 - For electrical capacity: include unit (e.g. "3 kW" not just "3")
 - For weight fields: include unit (e.g. "43 lbs" not just "43")
-- For voltage/phase/frequency: extract exactly as stated (e.g. "480V/3PH/60HZ", "400V/3PH")
-- For hazardous area class: extract exactly (e.g. "CLASS I DIV 1 GR. B,C,D" or "ATEX ZONE 2, GROUP IIA,B")
-- For price fields: if a vendor quotes BOTH a heater unit AND a control panel/PCA as separate line items for the SAME piece of equipment, ADD them together — the price field should reflect the full equipment cost including its panel
+- For voltage/phase/frequency: extract the FULL string including Hz (e.g. "480V/3PH/60HZ" — never truncate to "480V/3PH")
+- For hazardous area class: extract the area classification exactly as written by each vendor — do not confuse certification names (CSA, ATEX) with area class (e.g. "CLASS I DIV 1 GR. B,C,D" or "ZONE 2, GROUP IIA,B")
+- For design_pressure and design_tempurature fields: ONLY put pressure/temperature values here (e.g. "15 PSI", "78°C") — NEVER put certification names like "CSA" or "ATEX" in these fields
+- For price fields: if a vendor quotes BOTH a main equipment unit AND a control panel/PCA as separate line items for the SAME piece of equipment, ADD them together for that equipment's price field
 - For lead times: use the PRODUCT DELIVERY lead time (not drawing submittal). If one lead time covers all items, repeat it for each item field
-- For "total_length_dimension" fields: use the full immersion/bundle length (the long dimension, e.g. 48.0625 in)
-- For "flange_face_to_bundle_end_dim" fields: use the shorter cold section / unheated length (e.g. 3.875 in, 4.0 in)
-- For design pressure/temperature: extract from vendor quotes when stated (e.g. "15 PSI", "78°C")
+- For "total_length_dimension" fields: use the full immersion/bundle length (the long dimension)
+- For "flange_face_to_bundle_end_dim" fields: use the shorter cold section / unheated length
+- For design pressure/temperature: extract from vendor quotes when stated
 - quotation_number = the vendor's quote/reference number, NOT their internal project reference code
 - null for any field not found — do NOT fabricate or guess
 - Extract every spec, technical parameter, price, commercial term, and note you can find
@@ -617,9 +618,12 @@ async function submitFeedback(){
   try{
     await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({rating:currentRating,comment,cell_corrections:cells,filename:currentFilename,equipment:currentEquipment,timestamp:new Date().toISOString()})});
-    document.getElementById('fb-thanks').style.display='block';
-    document.getElementById('fbox-fields').style.display='none';
-    document.getElementById('fbox-actions').style.display='none';
+    const thanks=document.getElementById('fb-thanks');
+    const fields=document.getElementById('fbox-fields');
+    const actions=document.getElementById('fbox-actions');
+    if(thanks)thanks.style.display='block';
+    if(fields)fields.style.display='none';
+    if(actions)actions.style.display='none';
   }catch(e){document.getElementById('fb-submit').disabled=false;alert('Could not save feedback: '+e.message);}
 }
 function skipFeedback(){document.getElementById('fbox').classList.remove('show');}
@@ -811,9 +815,12 @@ async function run(){
       document.getElementById('fb-submit').disabled=true;
       document.getElementById('fb-comment').value='';
       document.getElementById('fb-cells').value='';
-      document.getElementById('fb-thanks').style.display='none';
-      document.getElementById('fbox-fields').style.display='';
-      document.getElementById('fbox-actions').style.display='';
+      const fbThanks=document.getElementById('fb-thanks');
+      const fbFields=document.getElementById('fbox-fields');
+      const fbActions=document.getElementById('fbox-actions');
+      if(fbThanks)fbThanks.style.display='none';
+      if(fbFields)fbFields.style.display='';
+      if(fbActions)fbActions.style.display='';
       document.getElementById('fbox').classList.remove('show');
     }
   }catch(err){
@@ -832,6 +839,23 @@ async function run(){
 
 FEEDBACK_DIR = os.path.join(tempfile.gettempdir(), "bidtab_feedback")
 os.makedirs(FEEDBACK_DIR, exist_ok=True)
+
+# Seed feedback store from bundled seed files on first run
+def _seed_feedback():
+    seed_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")
+    for fname in os.listdir(seed_dir):
+        if not fname.endswith("_feedback_seed.json"):
+            continue
+        equip_slug = fname.replace("_feedback_seed.json", "")
+        dest = os.path.join(FEEDBACK_DIR, f"{equip_slug}.json")
+        if os.path.exists(dest):
+            continue  # don't overwrite existing feedback
+        try:
+            import shutil
+            shutil.copy(os.path.join(seed_dir, fname), dest)
+        except Exception:
+            pass
+_seed_feedback()
 
 def load_feedback_for_template(equipment: str) -> str:
     """Load all past feedback for this equipment type and format it for Claude."""
